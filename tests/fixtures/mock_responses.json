@@ -1,0 +1,233 @@
+{
+  "scenarios": {
+    "S1_comparative_drug_efficacy": {
+      "query": "Efficacy and cardiovascular outcomes of GLP-1 receptor agonists vs SGLT2 inhibitors in type 2 diabetes mellitus with CKD",
+      "clean_query": "Efficacy and cardiovascular outcomes of GLP-1 receptor agonists vs SGLT2 inhibitors in type 2 diabetes mellitus with CKD",
+      "canonical_query": "Comparative efficacy and cardiovascular outcomes of glucagon-like peptide-1 receptor agonists versus sodium-glucose cotransporter-2 inhibitors in patients with type 2 diabetes mellitus and chronic kidney disease",
+      "route": "COMPLEX",
+      "router_confidence": 0.95,
+      "router_reasoning": "Multi-arm drug comparison requiring decomposed subquestions and cross-study contrast",
+      "pico": {
+        "population": "Patients with type 2 diabetes mellitus and chronic kidney disease",
+        "intervention": "SGLT2 inhibitors (empagliflozin, dapagliflozin)",
+        "comparator": "GLP-1 receptor agonists (semaglutide)",
+        "outcome": "Cardiovascular death, MACE, heart failure hospitalization, renal disease progression"
+      },
+      "subqueries": [
+        "SGLT2 inhibitors cardiovascular and renal outcomes type 2 diabetes CKD",
+        "GLP-1 receptor agonists cardiovascular outcomes type 2 diabetes CKD",
+        "SGLT2 inhibitors versus GLP-1 receptor agonists comparative meta-analysis"
+      ],
+      "crag_sufficiency": {
+        "grade": "SUFFICIENT",
+        "confidence": 0.94,
+        "missing_concepts": [],
+        "reason": "Retrieved records provide high-quality RCT and meta-analytic evidence directly comparing both drug classes on renal and cardiovascular endpoints."
+      },
+      "evidence_pack_pmids": [
+        "35100001",
+        "35100002",
+        "35100003",
+        "35100004",
+        "35100005"
+      ],
+      "synthesis": "Evidence from randomized controlled trials and network meta-analyses indicates that both SGLT2 inhibitors and GLP-1 receptor agonists provide substantial cardiorenal protection in patients with type 2 diabetes and chronic kidney disease, but exhibit distinct profile advantages. Empagliflozin significantly reduces progression of kidney disease and cardiovascular death (hazard ratio 0.72) [PMID: 35100001]. Once-weekly semaglutide reduces major adverse cardiovascular events (hazard ratio 0.74) and diabetic nephropathy [PMID: 35100002]. In direct network meta-analysis, SGLT2 inhibitors were superior in preventing heart failure hospitalization (RR 0.68 vs 0.90) and end-stage kidney disease, whereas GLP-1 receptor agonists achieved greater stroke reduction (RR 0.85 vs 0.99) [PMID: 35100003].",
+      "cited_pmids": [
+        "35100001",
+        "35100002",
+        "35100003"
+      ],
+      "citations_valid": true,
+      "citation_precision": 1.0,
+      "consensus_level": "consensus",
+      "evidence_gaps": []
+    },
+    "S2_rare_disease_crag_corrective": {
+      "query": "Sotorasib resistance mechanisms in KRAS G12C mutated non-small cell lung cancer",
+      "clean_query": "Sotorasib resistance mechanisms in KRAS G12C mutated non-small cell lung cancer",
+      "canonical_query": "Acquired resistance mechanisms to sotorasib in KRAS G12C-mutated non-small cell lung cancer",
+      "route": "COMPLEX",
+      "router_confidence": 0.92,
+      "router_reasoning": "Biological mechanism inquiry requiring multi-pathway investigation and potential corrective search",
+      "pico": {
+        "population": "Patients with advanced KRAS G12C-mutated non-small cell lung cancer",
+        "intervention": "Sotorasib monotherapy",
+        "comparator": null,
+        "outcome": "Acquired drug resistance mechanisms, secondary mutations, bypass signaling"
+      },
+      "initial_crag_grade": "PARTIAL",
+      "initial_missing_concepts": [
+        "MET amplification",
+        "secondary KRAS mutations"
+      ],
+      "corrective_query": "MET amplification and secondary mutations acquired resistance to sotorasib KRAS G12C",
+      "final_crag_grade": "SUFFICIENT",
+      "evidence_pack_pmids": [
+        "35200001",
+        "35200002",
+        "35200004",
+        "35200005"
+      ],
+      "synthesis": "While sotorasib demonstrates significant progression-free survival benefits over docetaxel in KRAS G12C-mutated advanced NSCLC [PMID: 35200001], acquired resistance universally develops. Genomic profiling demonstrates that resistance is mediated by secondary KRAS switch II mutations such as Y96D, A59S, and Q61H, as well as bypass RTK activation [PMID: 35200002]. High-level MET gene amplification occurs in approximately 13-14% of progressing patients, restoring downstream MAPK and PI3K/mTOR cascades [PMID: 35200004]. Co-targeting with SHP2 inhibitors or MET inhibitors overcomes this resistance in preclinical models [PMID: 35200005].",
+      "cited_pmids": [
+        "35200001",
+        "35200002",
+        "35200004",
+        "35200005"
+      ],
+      "citations_valid": true,
+      "citation_precision": 1.0,
+      "consensus_level": "consensus",
+      "evidence_gaps": []
+    },
+    "S3_corpus_absence_abstention": {
+      "query": "Hyperbaric oxygen therapy efficacy in reversing advanced Stage IV Alzheimer's disease tau aggregation",
+      "clean_query": "Hyperbaric oxygen therapy efficacy in reversing advanced Stage IV Alzheimer's disease tau aggregation",
+      "canonical_query": "Efficacy of hyperbaric oxygen therapy in clearing or reversing advanced stage IV neurofibrillary tau tangle aggregation in Alzheimer's disease",
+      "route": "COMPLEX",
+      "router_confidence": 0.88,
+      "router_reasoning": "Hypothesis testing on advanced pathology reversal requiring strict evidence grading",
+      "pico": {
+        "population": "Patients or animal models with advanced Stage IV Alzheimer's disease tau aggregation",
+        "intervention": "Hyperbaric oxygen therapy (HBOT)",
+        "comparator": "Normobaric air or standard care",
+        "outcome": "Reversal of tau aggregation, neurofibrillary tangle clearance"
+      },
+      "crag_sufficiency": {
+        "grade": "INSUFFICIENT",
+        "confidence": 0.96,
+        "missing_concepts": [
+          "human clinical trials",
+          "demonstrated tau clearance"
+        ],
+        "reason": "Available evidence explicitly demonstrates a total failure to reduce or clear advanced tau tangles, with no clinical trials showing efficacy."
+      },
+      "evidence_pack_pmids": [
+        "35500005"
+      ],
+      "synthesis": "There is insufficient scientific evidence to support the efficacy of hyperbaric oxygen therapy in reversing advanced Stage IV tau aggregation in Alzheimer's disease. Experimental models of advanced tauopathy demonstrate that hyperbaric oxygenation fails to reduce insoluble hyperphosphorylated tau levels or reverse neurofibrillary tangles (tau pS396/total tau ratio 1.04 vs 0.99; p = 0.78) [PMID: 35500005]. No human clinical trials validate pathological tau clearance with hyperbaric therapy. The system abstains from claiming clinical benefit due to absent therapeutic evidence.",
+      "cited_pmids": [
+        "35500005"
+      ],
+      "citations_valid": true,
+      "citation_precision": 1.0,
+      "consensus_level": "insufficient",
+      "evidence_gaps": [
+        "No human clinical trial data evaluating HBOT for tau clearance in Alzheimer's disease",
+        "Available preclinical study demonstrates complete lack of efficacy in reversing established tau tangle pathology"
+      ]
+    },
+    "S4_strict_temporal_study_type_filter": {
+      "query": "Randomized controlled trials of mRNA vaccines in pediatric populations published after 2022",
+      "clean_query": "Randomized controlled trials of mRNA vaccines in pediatric populations published after 2022",
+      "canonical_query": "Randomized controlled trials evaluating safety and efficacy of mRNA vaccines in pediatric cohorts published after 2022",
+      "route": "MODERATE",
+      "router_confidence": 0.94,
+      "router_reasoning": "Filtered clinical query requiring temporal constraint enforcement and multi-vaccine expansion",
+      "inferred_filters": {
+        "year_min": 2023,
+        "year_max": null,
+        "study_type_filters": [
+          "Randomized Controlled Trial"
+        ]
+      },
+      "pico": {
+        "population": "Pediatric cohorts (infants, children aged 6 months to 17 years)",
+        "intervention": "mRNA vaccines (BNT162b2, mRNA-1273, mRNA RSV)",
+        "comparator": "Placebo or standard care",
+        "outcome": "Vaccine efficacy, immunogenicity, safety, reactogenicity"
+      },
+      "evidence_pack_pmids": [
+        "35300001",
+        "35300002",
+        "35300004",
+        "35300005"
+      ],
+      "synthesis": "Randomized controlled trials published after 2022 establish that mRNA vaccines provide robust immunogenicity and protection in pediatric cohorts. In children aged 6 months to 4 years, a three-dose series of BNT162b2 showed 73.2% efficacy with favorable reactogenicity [PMID: 35300001]. Similarly, two 25-ug doses of mRNA-1273 demonstrated noninferior neutralizing antibody titers and prevented symptomatic infection in young children [PMID: 35300002]. In immunocompromised pediatric recipients, bivalent mRNA boosters generated 4.3-fold higher neutralizing titers [PMID: 35300004]. Furthermore, a Phase 3 trial of an investigational pediatric mRNA RSV vaccine in infants demonstrated 81.4% efficacy against lower respiratory tract disease [PMID: 35300005].",
+      "cited_pmids": [
+        "35300001",
+        "35300002",
+        "35300004",
+        "35300005"
+      ],
+      "citations_valid": true,
+      "citation_precision": 1.0,
+      "consensus_level": "consensus",
+      "evidence_gaps": []
+    },
+    "S5_lay_query_acronym_normalization": {
+      "query": "T2D heart attack risk reduction with metformin",
+      "clean_query": "Type 2 Diabetes Mellitus myocardial infarction risk reduction with metformin",
+      "canonical_query": "Type 2 diabetes mellitus myocardial infarction risk reduction with metformin monotherapy",
+      "route": "SIMPLE",
+      "router_confidence": 0.97,
+      "router_reasoning": "Direct single-intervention clinical inquiry with clear acronym expansion and fast hybrid retrieval",
+      "acronyms_expanded": {
+        "T2D": "Type 2 Diabetes Mellitus",
+        "heart attack": "Myocardial Infarction"
+      },
+      "mesh_terms": [
+        "Diabetes Mellitus, Type 2",
+        "Myocardial Infarction",
+        "Metformin"
+      ],
+      "pico": {
+        "population": "Patients with Type 2 Diabetes Mellitus",
+        "intervention": "Metformin",
+        "comparator": "Dietary therapy or sulfonylureas",
+        "outcome": "Myocardial infarction risk reduction, all-cause mortality"
+      },
+      "evidence_pack_pmids": [
+        "35600001",
+        "35600002"
+      ],
+      "synthesis": "Long-term evidence confirms that metformin monotherapy provides durable reduction in myocardial infarction risk among patients with type 2 diabetes. In the 10-year post-trial follow-up of the UKPDS, intensive glucose control with metformin conferred a 33% reduction in myocardial infarction risk (hazard ratio 0.67; p = 0.005) and a 27% reduction in all-cause mortality [PMID: 35600001]. In older adults, initiating metformin was associated with a 20% lower hazard of composite cardiovascular events compared with sulfonylurea monotherapy (adjusted HR 0.80) [PMID: 35600002].",
+      "cited_pmids": [
+        "35600001",
+        "35600002"
+      ],
+      "citations_valid": true,
+      "citation_precision": 1.0,
+      "consensus_level": "consensus",
+      "evidence_gaps": []
+    }
+  },
+  "adversarial_cases": {
+    "hallucinated_pmid_injection": {
+      "evidence_pack_pmids": [
+        "35100001",
+        "35100002"
+      ],
+      "raw_synthesis": "Empagliflozin reduces renal progression [PMID: 35100001], and mirabegron cured CKD [PMID: 99999999].",
+      "detected_citations": [
+        "35100001",
+        "99999999"
+      ],
+      "is_valid": false,
+      "citation_precision": 0.5,
+      "expected_gate_action": "FAIL_CLOSED_OR_REPAIR",
+      "repaired_synthesis": "Empagliflozin reduces renal progression [PMID: 35100001].",
+      "repaired_citations": [
+        "35100001"
+      ],
+      "repaired_citation_precision": 1.0
+    },
+    "unsupported_span_claim": {
+      "pmid": "35100001",
+      "abstract": "In this double-blind, randomized controlled trial, 6,609 patients with type 2 diabetes mellitus and chronic kidney disease were assigned to receive empagliflozin 10 mg daily or matching placebo.",
+      "unsupported_claim": "Empagliflozin completely cures type 2 diabetes in 100% of participants.",
+      "supported_claim": "Empagliflozin 10 mg daily was evaluated in 6,609 patients with type 2 diabetes and chronic kidney disease.",
+      "expected_span_match_supported": true,
+      "expected_span_match_unsupported": false
+    },
+    "empty_corpus_response": {
+      "query": "Quantum vibrational frequency cure for glioblastoma multiforme",
+      "retrieved_pmids": [],
+      "expected_route": "COMPLEX",
+      "expected_crag": "INSUFFICIENT",
+      "expected_action": "ABSTAIN",
+      "synthesis": "No scientific literature was found in the indexed corpus regarding quantum vibrational frequencies for glioblastoma multiforme. The system abstains from generating unsupported treatment summaries.",
+      "cited_pmids": []
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-09-26T13:51:07.213675+00:00",
+  "setup_mode": "online",
+  "status": "ready",
+  "dataset": {
+    "path": "data/raw/pubmed_sample.csv",
+    "record_count": 30,
+    "status": "ready"
+  },
+  "models": {
+    "ncbi/MedCPT-Query-Encoder": {
+      "status": "cached",
+      "weights_verified": true,
+      "source": "local-cache-or-huggingface",
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+    },
+    "ncbi/MedCPT-Article-Encoder": {
+      "status": "cached",
+      "weights_verified": true,
+      "source": "local-cache-or-huggingface",
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+    },
+    "ncbi/MedCPT-Cross-Encoder": {
+      "status": "cached",
+      "weights_verified": true,
+      "source": "local-cache-or-huggingface",
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+    }
+  }
+}

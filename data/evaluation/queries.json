@@ -1,0 +1,44 @@
+[
+  {
+    "id": "empagliflozin_ckd",
+    "query": "empagliflozin for chronic kidney disease in type 2 diabetes",
+    "relevant_pmids": ["35100001"],
+    "expected_route": "SIMPLE"
+  },
+  {
+    "id": "semaglutide_cardiovascular",
+    "query": "semaglutide cardiovascular outcomes in type 2 diabetes",
+    "relevant_pmids": ["35100002"],
+    "expected_route": "SIMPLE"
+  },
+  {
+    "id": "sglt2_glp1_comparison",
+    "query": "compare SGLT2 inhibitors versus GLP-1 receptor agonists for CKD in type 2 diabetes",
+    "relevant_pmids": ["35100003"],
+    "expected_route": "COMPLEX"
+  },
+  {
+    "id": "sotorasib_resistance",
+    "query": "sotorasib resistance mechanisms in KRAS G12C NSCLC",
+    "relevant_pmids": ["35200002", "35200004", "35200005"],
+    "expected_route": "COMPLEX"
+  },
+  {
+    "id": "pediatric_mrna_trials",
+    "query": "randomized controlled mRNA vaccine trials in children published after 2022",
+    "relevant_pmids": ["35300001", "35300002", "35300004", "35300005"],
+    "expected_route": "MODERATE"
+  },
+  {
+    "id": "alzheimer_antibody_comparison",
+    "query": "lecanemab versus donanemab for early Alzheimer disease",
+    "relevant_pmids": ["35500001", "35500002"],
+    "expected_route": "COMPLEX"
+  },
+  {
+    "id": "tezepelumab_asthma",
+    "query": "tezepelumab for severe asthma",
+    "relevant_pmids": ["35700001"],
+    "expected_route": "SIMPLE"
+  }
+]

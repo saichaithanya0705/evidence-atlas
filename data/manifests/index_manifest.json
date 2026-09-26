@@ -1,0 +1,87 @@
+{
+  "manifest_version": "1.0.0",
+  "build_timestamp_utc": "2026-09-26T13:53:11.623705+00:00",
+  "build_duration_seconds": 1.22,
+  "corpus": {
+    "source_file": "data\\processed\\cleaned_pubmed.parquet",
+    "sha256": "081d1be83053f860d8482b0a025eed5121ccd381bd731354c003b0913fa3e0bc",
+    "total_records": 30,
+    "pmid_range": {
+      "min": 35100001,
+      "max": 35900001
+    },
+    "year_range": {
+      "min": 2020,
+      "max": 2024
+    },
+    "study_type_breakdown": {
+      "Randomized Controlled Trial": 16,
+      "Observational": 6,
+      "Preclinical Study": 4,
+      "Systematic Review": 2,
+      "Clinical Trial": 2
+    }
+  },
+  "dense_index": {
+    "model_name": "ncbi/MedCPT-Article-Encoder",
+    "model_revision": "d05a736da4bb84ee4057b7f7999485be6ed85465",
+    "model_revision_source": "huggingface_cache",
+    "dimension": 768,
+    "pooling": "cls",
+    "normalized": true,
+    "metric": "cosine",
+    "embeddings_file": "data\\processed\\article_embeddings.npy",
+    "storage_size_bytes": 92288,
+    "storage_size_mb": 0.09
+  },
+  "sparse_index": {
+    "algorithm": "BM25Okapi",
+    "index_file": "data\\processed\\bm25_index.pkl",
+    "parameters": {
+      "k1": 1.5,
+      "b": 0.75
+    },
+    "vocabulary_size": 1208,
+    "avg_document_length_tokens": 142.83,
+    "indexed_fields": [
+      "title",
+      "abstract",
+      "mesh_terms",
+      "keywords"
+    ],
+    "qdrant_vector_name": "bm25",
+    "qdrant_modifier": "idf",
+    "storage_size_bytes": 47836,
+    "storage_size_mb": 0.05
+  },
+  "vector_store": {
+    "engine": "qdrant-client-embedded",
+    "storage_path": "data\\qdrant_storage",
+    "collection_name": "medical_abstracts",
+    "points_count": 30,
+    "vector_names": [
+      "dense",
+      "bm25"
+    ],
+    "indexed_payload_fields": [
+      {
+        "field_name": "year",
+        "schema_type": "integer"
+      },
+      {
+        "field_name": "study_type",
+        "schema_type": "keyword"
+      },
+      {
+        "field_name": "mesh_terms",
+        "schema_type": "keyword"
+      }
+    ],
+    "storage_size_bytes": 324275,
+    "storage_size_mb": 0.31
+  },
+  "environment": {
+    "python_version": "3.11.9",
+    "platform": "win32"
+  }
+}

@@ -1,0 +1,131 @@
+# ==============================================================================
+# AI-Powered Medical Research Abstract Finder - Git Ignore Configuration
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Environment & Secret Hygiene (FEAT-R1-03 / Audit Check 1.6)
+# Strictly exclude all private secrets, credentials, and custom environment files.
+# Allow ONLY .env.example to be tracked as the canonical template.
+# ------------------------------------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+secrets/
+
+# ------------------------------------------------------------------------------
+# 2. Python Virtual Environments, Bytecode & Runtime Artifacts
+# ------------------------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ------------------------------------------------------------------------------
+# 3. Model Weights & Embedded Vector Database Storage (Heavy Binary Caches)
+# ------------------------------------------------------------------------------
+data/models_cache/
+data/qdrant_storage/
+data/processed/
+!data/processed/.gitkeep
+*.lock
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.h5
+*.ckpt
+
+# ------------------------------------------------------------------------------
+# 4. Large Archives & Downloaded Datasets
+# ------------------------------------------------------------------------------
+*.tar.gz
+*.tgz
+*.tar
+*.zip
+*.gz
+*.bz2
+*.xz
+*.7z
+*.rar
+PubMed_Phrases.tar.gz
+
+# ------------------------------------------------------------------------------
+# 5. Frontend & Node.js Dependencies (React + Vite)
+# ------------------------------------------------------------------------------
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+frontend/dist-ssr/
+*.local
+
+# ------------------------------------------------------------------------------
+# 6. Build Artifacts & Packaging
+# ------------------------------------------------------------------------------
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# 7. Testing, Code Coverage, Playwright Artifacts & Logs
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+output/
+frontend/.playwright-cli/
+.playwright-cli/
+playwright-report/
+test-results/
+data/evaluation/latest*.json
+
+# ------------------------------------------------------------------------------
+# 7. Operating System & IDE Specific Files
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.agents/
