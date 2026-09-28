@@ -4,6 +4,41 @@
 
 This checkpoint instruments the backend research graph and records timing data in the existing administrator-only trace. Normal users still receive no query plan, trace, evidence spans, retrieval diagnostics, or timing metadata.
 
+## First-time setup on another system
+
+Clone the repository, enter it, create `.env` from the example, and configure the private NVIDIA settings:
+
+```powershell
+git clone https://github.com/saichaithanya07005/capstone.git
+cd capstone
+copy .env.example .env
+notepad .env
+```
+
+Set `LLM_MODE=nim` and `NVIDIA_API_KEY` in `.env` for live synthesis. `MEDCPT_KEEP_MODELS_LOADED=true` is optional and should only be enabled when the machine has enough GPU/RAM; leave the example default (`false`) on constrained machines. Do not commit or share `.env`.
+
+For the complete real PubMed corpus, copy `PubMed_Phrases.tar.gz` into the repository root and run:
+
+```powershell
+start.bat --ingest
+```
+
+This installs Python dependencies, downloads/verifies all three MedCPT models, fetches the official NCBI records, builds the derived indexes, installs frontend dependencies, and starts FastAPI plus Vite. If the dataset and generated indexes have already been restored on that machine, run `start.bat` instead; Docker is not required. Do not use `--offline` for live MedCPT/NVIDIA testing.
+
+Open `http://127.0.0.1:5173` after startup; the API health endpoint is `http://127.0.0.1:8000/health`. Keep the launcher window open and press Ctrl+C there to stop the services.
+
+## Consecutive runs
+
+Always update the checkout before starting anything:
+
+```powershell
+cd capstone
+git pull origin master
+start.bat
+```
+
+The launcher preserves the existing `.env`, raw corpus, model cache, and compatible indexes. If a fresh system does not have the ignored corpus/index artifacts, place `PubMed_Phrases.tar.gz` in the root and use `start.bat --ingest` once; later runs return to `git pull origin master` followed by `start.bat`. After the services are running, measure backend latency with `.venv\Scripts\python.exe scripts\benchmark_research_latency.py --runs 3`.
+
 ## Implemented in this checkpoint
 
 - Added per-node workflow timings and retrieval-pass timings to `/trace/{request_id}` and admin `/search` output.
