@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-28T00:32:42.978705+00:00",
+  "generated_at": "2026-09-28T05:24:18.475453+00:00",
   "setup_mode": "online",
   "status": "ready",
   "dataset": {
@@ -12,19 +12,19 @@
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+      "cache_dir": "C:\\Users\\Administrator\\Downloads\\capstone\\data\\models_cache"
     },
     "ncbi/MedCPT-Article-Encoder": {
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+      "cache_dir": "C:\\Users\\Administrator\\Downloads\\capstone\\data\\models_cache"
     },
     "ncbi/MedCPT-Cross-Encoder": {
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
+      "cache_dir": "C:\\Users\\Administrator\\Downloads\\capstone\\data\\models_cache"
     }
   }
 }

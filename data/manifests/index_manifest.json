@@ -1,10 +1,10 @@
 {
   "manifest_version": "1.0.0",
-  "build_timestamp_utc": "2026-09-28T00:38:31.994561+00:00",
-  "build_duration_seconds": 291.17,
+  "build_timestamp_utc": "2026-09-28T10:13:10.852993+00:00",
+  "build_duration_seconds": 870.57,
   "corpus": {
     "source_file": "data\\processed\\cleaned_pubmed.parquet",
-    "sha256": "2628237f352f7cf014fd82b09619771d02eaf17a161261569ebb5e0c57e174f6",
+    "sha256": "4ce894b6eff80ab353128581f661e0c24a01bb9d85403298271d8c6077a9d332",
     "total_records": 29939,
     "pmid_range": {
       "min": 956728,
@@ -84,7 +84,7 @@
     "storage_size_mb": 345.54
   },
   "environment": {
-    "python_version": "3.11.9",
+    "python_version": "3.10.11",
     "platform": "win32"
   }
 }

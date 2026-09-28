@@ -7,5 +7,5 @@
   "dropped_duplicate_content": 56,
   "parquet_path": "data/processed/cleaned_pubmed.parquet",
   "jsonl_path": "data/processed/cleaned_pubmed.jsonl",
-  "timestamp_utc": "2026-09-28T00:33:08.979996+00:00"
+  "timestamp_utc": "2026-09-28T05:25:02.065525+00:00"
 }

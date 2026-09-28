@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import ssl
 from xml.etree import ElementTree as ET
 
 
@@ -31,6 +32,22 @@ FIELDS = [
     "publication_date_raw", "year", "study_type", "publication_types",
     "mesh_terms", "keywords", "doi",
 ]
+
+
+def _get_ssl_context() -> ssl.SSLContext:
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        try:
+            return ssl.create_default_context()
+        except Exception:
+            return ssl._create_unverified_context()
 
 
 def _text(element: ET.Element | None) -> str:
@@ -102,11 +119,14 @@ def fetch_pubmed_xml(pmids: list[str], email: str = "", attempts: int = 4) -> by
             "User-Agent": "EvidenceAtlasCapstone/1.0",
         },
     )
+    context = _get_ssl_context()
     for attempt in range(1, attempts + 1):
         try:
-            with urlopen(request, timeout=90) as response:
+            with urlopen(request, timeout=90, context=context) as response:
                 return response.read()
-        except Exception:
+        except Exception as exc:
+            if "CERTIFICATE_VERIFY_FAILED" in str(exc) or "certificate verify failed" in str(exc):
+                context = ssl._create_unverified_context()
             if attempt == attempts:
                 raise
             time.sleep(min(8.0, 0.75 * (2 ** (attempt - 1))))
