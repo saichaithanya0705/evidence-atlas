@@ -34,6 +34,14 @@ LLM_MODE=nim
 
 Keep the key in `.env`; do not commit it. `.env` is excluded from Git. The key is sent to NVIDIA only when the application makes an NIM request. Model download and indexing do not require an NVIDIA key. To return to deterministic local demo responses, set `LLM_MODE=mock`.
 
+The NIM path uses a bounded, non-reasoning model call to select exact supporting spans; the server validates the returned PMID/span indices and renders cited text from the stored evidence. Invalid selections or provider failures fall back to deterministic source spans. `LLM_SYNTHESIS_MAX_TOKENS` bounds the selection call (default 300); an empty evidence set never calls NIM.
+
+## Backend latency measurements
+
+While the API is running, run `python scripts/benchmark_research_latency.py --runs 3` from the project root. It reports HTTP wall time, admin-only workflow stages, each retrieval pass, and synthesis time without printing the administrator key or answer. The first run includes model/index loading; later runs reflect warm-request latency. `--max-loops 2` exercises corrective retrieval, and `--year-min 2026` can measure a no-result filter against an older corpus.
+
+The default `MEDCPT_KEEP_MODELS_LOADED=false` releases the large query and cross-encoder weights between retrieval passes for memory-constrained machines. Set it to `true` in local `.env` when sufficient GPU/RAM is available; this avoids repeated loading and release costs. Search passes are serialized within the backend process because the retriever and reranker share mutable model and trace state.
+
 ## Corpus and model setup
 
 `python scripts/setup_assets.py` validates/preserves `data/raw/pubmed_sample.csv`, creates expected directories, verifies and caches `ncbi/MedCPT-Query-Encoder`, `ncbi/MedCPT-Article-Encoder`, and `ncbi/MedCPT-Cross-Encoder`, and writes `data/manifests/assets_manifest.json`. Normal mode fails with a nonzero exit code if a model cannot be downloaded and loaded. Use `--offline` only when intentionally working without model downloads. Do not use `--offline` to claim real MedCPT retrieval quality.

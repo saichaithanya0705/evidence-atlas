@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import uuid
+from time import perf_counter
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -68,6 +69,7 @@ class _WorkflowState:
     trace_payload: Dict[str, Any] = field(default_factory=dict)
     pending_details: Dict[str, Any] = field(default_factory=dict)
     next_query: Optional[str] = None
+    timings_ms: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class _GraphInput(TypedDict):
@@ -107,6 +109,7 @@ class ResearchService:
     ) -> None:
         self._settings = settings
         self._initialization_lock = threading.RLock()
+        self._search_lock = threading.RLock()
         self._query_analysis_service = query_analysis_service
         self._hybrid_retriever = hybrid_retriever
         self._reranker = reranker
@@ -201,25 +204,42 @@ class ResearchService:
         return plan
 
     def _search_plan(self, plan: QueryPlan, top_k: int) -> Tuple[List[RetrievalCandidate], Dict[str, Any]]:
+        # The shared retriever/reranker own mutable model weights and last_trace.
+        # Serialize each pass so concurrent requests cannot release each other's models.
+        with self._search_lock:
+            return self._search_plan_locked(plan, top_k)
+
+    def _search_plan_locked(self, plan: QueryPlan, top_k: int) -> Tuple[List[RetrievalCandidate], Dict[str, Any]]:
+        timings_ms: Dict[str, float] = {}
+        started = perf_counter()
         retrieval = self._get_hybrid_retriever()
         reranker = self._get_reranker()
         # Query and cross encoders are both large checkpoints.  A corrective
         # pass needs the query encoder again, so release the prior reranker
         # before dense retrieval and release the query encoder before reranking.
-        if hasattr(reranker, "release"):
+        retain_models = bool(getattr(self.settings, "MEDCPT_KEEP_MODELS_LOADED", False))
+        if not retain_models and hasattr(reranker, "release"):
             reranker.release()
+        timings_ms["release_reranker"] = round((perf_counter() - started) * 1000, 2)
+        started = perf_counter()
         candidates = retrieval.search(plan, top_k=max(top_k, int(getattr(self.settings, "RERANKER_TOP_N", top_k))))
-        if hasattr(retrieval, "release_query_encoder"):
+        timings_ms["hybrid_retrieval"] = round((perf_counter() - started) * 1000, 2)
+        started = perf_counter()
+        if not retain_models and hasattr(retrieval, "release_query_encoder"):
             retrieval.release_query_encoder()
+        timings_ms["release_query_encoder"] = round((perf_counter() - started) * 1000, 2)
+        started = perf_counter()
         query = plan.original_query or plan.canonical_query
         reranked, reranker_trace = reranker.rerank(
             query,
             candidates,
             top_n=int(getattr(self.settings, "RERANKER_TOP_N", top_k)),
         )
+        timings_ms["reranking"] = round((perf_counter() - started) * 1000, 2)
         return reranked[:top_k], {
             "retrieval": copy.deepcopy(getattr(retrieval, "last_trace", {})),
             "reranker": reranker_trace,
+            "timings_ms": timings_ms,
         }
 
     def search(
@@ -234,7 +254,9 @@ class ResearchService:
             raise ValueError("query must not be empty")
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
+        started = perf_counter()
         plan = self._build_plan(query, user_filters, route_override)
+        analysis_ms = round((perf_counter() - started) * 1000, 2)
         candidates, details = self._search_plan(plan, top_k)
         trace = {
             "stages": [
@@ -245,6 +267,7 @@ class ResearchService:
             ],
             "query_plan": plan.model_dump(mode="json"),
             "candidate_pmids": [candidate.pmid for candidate in candidates],
+            "timings_ms": {"query_analysis": analysis_ms, **details.get("timings_ms", {})},
         }
         return plan, candidates, trace
 
@@ -345,6 +368,7 @@ class ResearchService:
         configured_budget = max(0, int(getattr(self.settings, "MAX_CORRECTIVE_LOOPS", max_loops)))
         budget = min(max(0, int(max_loops)), configured_budget)
         state = _WorkflowState(request_id=request_id, query=query, user_filters=filters)
+        research_started = perf_counter()
         from langgraph.graph import END, START, StateGraph
 
         def query_analysis_node(data: _GraphInput) -> Dict[str, _WorkflowState]:
@@ -560,6 +584,7 @@ class ResearchService:
                     "mode": synthesis.mode,
                     "fallback_reason": synthesis.fallback_reason,
                     "insufficient_evidence": insufficient,
+                    "timings_ms": synthesis.timings_ms,
                 },
                 "citation_audit": audit_dict,
             }
@@ -577,15 +602,31 @@ class ResearchService:
                     self._traces.popitem(last=False)
             return {"workflow": workflow}
 
+        def timed_node(name: str, node: Any) -> Any:
+            def wrapped(data: _GraphInput) -> Dict[str, _WorkflowState]:
+                started = perf_counter()
+                try:
+                    return node(data)
+                finally:
+                    workflow = data["workflow"]
+                    workflow.timings_ms.append(
+                        {
+                            "stage": name,
+                            "iteration": workflow.iteration if name in {"retrieve", "judge", "correct"} else None,
+                            "duration_ms": round((perf_counter() - started) * 1000, 2),
+                        }
+                    )
+            return wrapped
+
         graph = StateGraph(_GraphInput)
-        graph.add_node("query_analysis", query_analysis_node)
-        graph.add_node("retrieve", retrieve_node)
-        graph.add_node("judge", judge_node)
-        graph.add_node("correct", correct_node)
-        graph.add_node("evidence", evidence_node)
-        graph.add_node("synthesize", synthesize_node)
-        graph.add_node("validate", validate_node)
-        graph.add_node("done", done_node)
+        graph.add_node("query_analysis", timed_node("query_analysis", query_analysis_node))
+        graph.add_node("retrieve", timed_node("retrieve", retrieve_node))
+        graph.add_node("judge", timed_node("judge", judge_node))
+        graph.add_node("correct", timed_node("correct", correct_node))
+        graph.add_node("evidence", timed_node("evidence", evidence_node))
+        graph.add_node("synthesize", timed_node("synthesize", synthesize_node))
+        graph.add_node("validate", timed_node("validate", validate_node))
+        graph.add_node("done", timed_node("done", done_node))
         graph.add_edge(START, "query_analysis")
         graph.add_edge("query_analysis", "retrieve")
         graph.add_edge("retrieve", "judge")
@@ -604,7 +645,15 @@ class ResearchService:
                 "evidence_limit": int(getattr(self.settings, "RERANKER_TOP_N", 10)),
             }
         )
-        return result["workflow"].response
+        completed = result["workflow"]
+        completed.trace_payload["timings_ms"] = {
+            "total": round((perf_counter() - research_started) * 1000, 2),
+            "stages": completed.timings_ms,
+        }
+        with self._trace_lock:
+            if request_id in self._traces:
+                self._traces[request_id] = completed.trace_payload
+        return completed.response
 
     def get_trace(self, request_id: str) -> Optional[Dict[str, Any]]:
         with self._trace_lock:

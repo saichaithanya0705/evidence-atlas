@@ -174,6 +174,8 @@ class MedCPTReranker:
 
     def release(self) -> None:
         """Release lazily loaded model weights before another dense pass."""
+        if self._model is None and self._tokenizer is None and not self._load_attempted:
+            return
         model, tokenizer = self._model, self._tokenizer
         self._model = None
         self._tokenizer = None

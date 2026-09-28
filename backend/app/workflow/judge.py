@@ -119,6 +119,7 @@ class EvidenceSufficiencyJudge:
                 base_url=settings.NVIDIA_BASE_URL,
                 api_key=settings.get_raw_nvidia_api_key(),
                 timeout=settings.LLM_TIMEOUT_SECONDS,
+                max_retries=0,
             )
         except Exception as exc:
             logger.warning("Unable to initialize optional NIM evidence judge: %s", exc)
@@ -197,6 +198,7 @@ class EvidenceSufficiencyJudge:
                     messages=messages,
                     temperature=0,
                     max_tokens=300,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
                 )
             elif callable(client):
                 response = client(plan.original_query, evidence, concept_list)
@@ -209,6 +211,8 @@ class EvidenceSufficiencyJudge:
 
     def judge(self, plan: QueryPlan, candidates: Sequence[RetrievalCandidate]) -> EvidenceGrade:
         deterministic = self._deterministic_grade(plan, candidates)
+        if not candidates:
+            return deterministic
         llm_result = self._llm_grade(plan, candidates)
         if llm_result is None:
             return deterministic

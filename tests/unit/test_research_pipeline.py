@@ -8,7 +8,7 @@ from backend.app.models.request_response import RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
 from backend.app.retrieval.hybrid import HybridRetriever, reciprocal_rank_fusion
 from backend.app.retrieval.reranker import MedCPTReranker
-from backend.app.workflow.judge import EvidenceGrade
+from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
 from backend.app.workflow.service import ResearchService
 from backend.app.workflow.synthesis import EvidenceSynthesizer
 
@@ -215,6 +215,10 @@ def test_research_corrective_loop_respects_budget_and_records_stages():
     assert len(trace["retrieval_iterations"]) == 2
     assert trace["stop_reason"] == "correction_budget_exhausted"
     assert result.citations_valid is True
+    assert trace["timings_ms"]["total"] >= 0
+    assert [item["iteration"] for item in trace["timings_ms"]["stages"] if item["stage"] == "retrieve"] == [0, 1]
+    assert all(item["duration_ms"] >= 0 for item in trace["timings_ms"]["stages"])
+    assert "timings_ms" in trace["retrieval_iterations"][0]
     assert [stage["stage"] for stage in trace["stages"]][-5:] == [
         "evidence_extraction", "synthesize", "validate", "citation_verification", "done"
     ]
@@ -267,6 +271,16 @@ def test_research_gracefully_abstains_when_budget_is_zero_and_no_papers_exist():
     assert "insufficient" in result.synthesis.casefold()
     assert trace["correction_attempts"] == 0
     assert trace["stop_reason"] == "correction_disabled"
+
+
+def test_empty_candidate_judgement_never_calls_optional_model():
+    def should_not_run(*_args):
+        raise AssertionError("No evidence exists for model grading")
+
+    grade = EvidenceSufficiencyJudge(llm_judge=should_not_run).judge(make_plan(), [])
+
+    assert grade.grade == "INSUFFICIENT"
+    assert grade.signals["candidate_count"] == 0
 
 
 def test_hallucinated_pmid_from_synthesizer_is_rejected_and_replaced_with_grounded_spans():

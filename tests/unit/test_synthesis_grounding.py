@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import EvidenceRecord, RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
@@ -140,3 +142,45 @@ def test_extraction_propagates_year_and_synthesis_context_includes_comparison_fi
         ),
         "limitations": None,
     }
+
+
+def test_no_evidence_skips_model_call_and_returns_valid_abstention():
+    def should_not_run(*_args):
+        raise AssertionError("A model call without source evidence is wasteful")
+
+    result = EvidenceSynthesizer(client=should_not_run).synthesize(
+        "rare disease treatment", [], [], insufficient=True
+    )
+
+    assert result.mode == "deterministic_spans"
+    assert result.audit.valid
+    assert result.audit.cited_pmids == []
+    assert result.timings_ms["generation"] == 0.0
+
+
+def test_nim_span_selection_is_validated_and_rendered_from_source():
+    raw = '{"selections":[{"pmid":"12345","span_index":0}]}'
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=raw))])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response)))
+    settings = SimpleNamespace(NVIDIA_MODEL_NAME="fake", LLM_MAX_TOKENS=2048, LLM_SYNTHESIS_MAX_TOKENS=300)
+    span = "Drug A reduced kidney disease progression among adults with diabetes."
+
+    result = EvidenceSynthesizer(client=client, settings=settings).synthesize("kidney outcomes", [_record(span)], [])
+
+    assert result.mode == "nvidia_nim"
+    assert result.audit.valid
+    assert result.audit.cited_pmids == ["12345"]
+    assert span.rstrip(".") in result.text
+
+
+def test_nim_rejects_unknown_span_and_falls_back_to_source():
+    raw = '{"selections":[{"pmid":"12345","span_index":9}]}'
+    response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=raw))])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: response)))
+    settings = SimpleNamespace(NVIDIA_MODEL_NAME="fake", LLM_MAX_TOKENS=2048, LLM_SYNTHESIS_MAX_TOKENS=300)
+
+    result = EvidenceSynthesizer(client=client, settings=settings).synthesize("kidney outcomes", [_record("Drug A reduced kidney disease progression.")], [])
+
+    assert result.mode == "deterministic_spans"
+    assert result.audit.valid
+    assert "unknown PMID or source span" in result.fallback_reason

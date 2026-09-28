@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     LLM_MODE: str = Field(default="mock", description="'nim', 'mock', or 'openai'")
     LLM_TEMPERATURE: float = Field(default=0.1)
     LLM_MAX_TOKENS: int = Field(default=2048)
+    LLM_SYNTHESIS_MAX_TOKENS: int = Field(default=300, ge=128, le=2048)
     LLM_TIMEOUT_SECONDS: float = Field(default=30.0)
 
     # Storage & Knowledge Base Paths
@@ -48,6 +49,10 @@ class Settings(BaseSettings):
     MEDCPT_ALLOW_MOCK: bool = Field(
         default=False,
         description="Explicitly allow deterministic non-MedCPT embeddings for offline demos/tests",
+    )
+    MEDCPT_KEEP_MODELS_LOADED: bool = Field(
+        default=False,
+        description="Retain query and cross-encoder weights between requests when memory permits",
     )
     DEVICE: str = Field(default="auto")
     EMBEDDING_DIMENSION: int = Field(default=768)
