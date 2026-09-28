@@ -60,7 +60,7 @@ export default function SynthesisPanel({ research, onTraceEvidence, isAdmin }) {
     <section className="panel synthesis-panel" aria-labelledby="synthesis-heading">
       <div className="panel-heading synthesis-heading">
         <h2 id="synthesis-heading"><Icon name="file" size={19} /> Evidence synthesis</h2>
-        {research ? (
+        {research && isAdmin ? (
           <span className={"consensus-label consensus-" + research.consensus_level}>
             {research.consensus_level || "Evidence summary"}
           </span>
@@ -72,7 +72,7 @@ export default function SynthesisPanel({ research, onTraceEvidence, isAdmin }) {
         </div>
       ) : (
         <>
-          {cautious && (
+          {isAdmin && cautious && (
             <div className="uncertainty-banner" role="status">
               <Icon name="alert" size={19} />
               <div>
@@ -110,7 +110,7 @@ export default function SynthesisPanel({ research, onTraceEvidence, isAdmin }) {
           {pmids.length > 0 && (
             <p className="synthesis-footnote">
               {new Set(pmids).size} cited source{new Set(pmids).size === 1 ? "" : "s"} returned
-                {research.citation_precision !== undefined && research.citation_precision !== null
+                {isAdmin && research.citation_precision !== undefined && research.citation_precision !== null
                 ? " · Citation precision " + Math.round(Number(research.citation_precision) * 100) + "%"
                 : ""}
               . Original abstracts remain the source of record.

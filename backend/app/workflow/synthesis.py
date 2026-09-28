@@ -59,14 +59,19 @@ def extract_cited_pmids(text: str) -> List[str]:
 
 def _claims(text: str) -> List[str]:
     claims = []
-    for raw in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
-        claim = raw.strip(" \t\r\n-*#")
-        if not claim or claim.startswith("#"):
-            continue
-        # Pure section labels are not factual claims.
-        if claim.endswith(":") and len(claim.split()) <= 8:
-            continue
-        claims.append(claim)
+    for raw_line in re.split(r"\n+", text or ""):
+        # A cited line is validated as one claim. This prevents biomedical
+        # abbreviations such as "et al." from being mistaken for an uncited
+        # sentence boundary inside an exact source span.
+        fragments = [raw_line] if _PMID_PATTERN.search(raw_line) else re.split(r"(?<=[.!?])\s+", raw_line)
+        for raw in fragments:
+            claim = raw.strip(" \t\r\n-*#")
+            if not claim or claim.startswith("#"):
+                continue
+            # Pure section labels are not factual claims.
+            if claim.endswith(":") and len(claim.split()) <= 8:
+                continue
+            claims.append(claim)
     return claims
 
 
@@ -274,7 +279,7 @@ class EvidenceSynthesizer:
             result = client(query, evidence, list(gaps), insufficient)
             return str(result)
         response = client.chat.completions.create(
-            model=getattr(self.settings, "NVIDIA_MODEL_NAME", "meta/llama-3.3-70b-instruct"),
+            model=getattr(self.settings, "NVIDIA_MODEL_NAME", "nvidia/nemotron-3-super-120b-a12b"),
             messages=messages,
             temperature=0,
             max_tokens=getattr(self.settings, "LLM_MAX_TOKENS", 2048),

@@ -110,13 +110,23 @@ class PICOExtractor:
             comparator = None
 
             # Detect intervention from phrasing: "efficacy of X in Y" or "X in Y" or "reduction with X"
-            with_match = re.search(r"\b(?:with|using|of)\s+([A-Za-z0-9\-\s]+?)(?:\s+(?:in|for|after|monotherapy)|\b|$)", q, re.IGNORECASE)
+            with_match = re.search(
+                r"\b(?:with|using|of)\s+([A-Za-z0-9][A-Za-z0-9\-\s]*?)"
+                r"(?=\s+(?:in|for|after|monotherapy)\b|[?,;.]|$)",
+                q,
+                re.IGNORECASE,
+            )
             if "risk reduction with" in q_lower:
                 m = re.search(r"risk reduction with\s+([A-Za-z0-9\-]+)", q, re.IGNORECASE)
                 if m:
                     intervention = m.group(1).strip()
             elif "efficacy of" in q_lower or "safety of" in q_lower:
-                m = re.search(r"(?:efficacy|safety|effect)\s+of\s+([A-Za-z0-9\-\s]+?)(?:\s+(?:in|for|vs|versus)|\b|$)", q, re.IGNORECASE)
+                m = re.search(
+                    r"(?:efficacy|safety|effect)\s+of\s+([A-Za-z0-9][A-Za-z0-9\-\s]*?)"
+                    r"(?=\s+(?:in|for|vs|versus)\b|[?,;.]|$)",
+                    q,
+                    re.IGNORECASE,
+                )
                 if m:
                     intervention = m.group(1).strip()
             elif "resistance mechanisms in" in q_lower:
@@ -134,7 +144,7 @@ class PICOExtractor:
         if not population:
             # Pattern: "in [patients with / cohorts with] X"
             pop_match = re.search(
-                r"\b(?:in|among|for)\s+(?:patients\s+(?:with\s+)?|cohorts?\s+(?:with\s+)?|individuals?\s+(?:with\s+)?|adults\s+(?:with\s+)?|children\s+(?:with\s+)?|infants\s+(?:with\s+)?)?\s*([^,;.]+?)(?:\s+(?:published|after|receiving|treated)|$)",
+                r"\b(?:in|among|for)\s+(?:patients\s+(?:with\s+)?|cohorts?\s+(?:with\s+)?|individuals?\s+(?:with\s+)?|adults\s+(?:with\s+)?|children\s+(?:with\s+)?|infants\s+(?:with\s+)?)?\s*([^,;.?]+?)(?:\s+(?:published|after|receiving|treated)|[?]|$)",
                 q,
                 re.IGNORECASE
             )
@@ -165,6 +175,8 @@ class PICOExtractor:
         # 3. Outcome Extraction
         # ---------------------------------------------------------------------
         outcome_cues = [
+            ("kidney outcomes", "Kidney outcomes"),
+            ("renal outcomes", "Renal outcomes"),
             ("cardiovascular outcomes", "Cardiovascular outcomes"),
             ("heart attack risk reduction", "Myocardial infarction risk reduction"),
             ("risk reduction", "Risk reduction"),

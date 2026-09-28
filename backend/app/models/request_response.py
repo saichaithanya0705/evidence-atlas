@@ -151,8 +151,6 @@ class PublicResearchResponse(BaseModel):
     query: str
     synthesis: str
     evidence_table: List[PublicEvidenceRecord] = Field(default_factory=list)
-    consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"] = "insufficient"
-    evidence_gaps: List[str] = Field(default_factory=list)
 
 
 class AdminVerifyResponse(BaseModel):

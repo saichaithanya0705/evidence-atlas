@@ -1,16 +1,20 @@
 {
   "file_path": "data/raw/pubmed_sample.csv",
-  "total_rows": 30,
+  "total_rows": 29995,
   "columns_found": [
     "pmid",
     "title",
     "abstract",
     "authors",
     "journal",
+    "publication_date",
+    "publication_date_raw",
     "year",
     "study_type",
+    "publication_types",
     "mesh_terms",
-    "keywords"
+    "keywords",
+    "doi"
   ],
   "identified_mappings": {
     "pmid": "pmid",
@@ -18,9 +22,9 @@
     "abstract": "abstract"
   },
   "duplicate_pmid_count": 0,
-  "duplicate_title_abstract_count": 0,
+  "duplicate_title_abstract_count": 21,
   "empty_title_count": 0,
   "empty_abstract_count": 0,
   "both_title_and_abstract_empty": 0,
-  "usable_rows_estimated": 30
+  "usable_rows_estimated": 29974
 }

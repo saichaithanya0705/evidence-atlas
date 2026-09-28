@@ -2,7 +2,7 @@
 backend/app/query/canonical.py
 Canonical Query Formulation Module (FEAT-R3-04).
 Synthesizes standardized biomedical research query phrasings bridging lay/short user inputs
-with formal literature indexing. Supports NVIDIA NIM (Llama 3.3 70B) and deterministic offline fallback.
+with formal literature indexing. Supports a configurable NVIDIA NIM model and deterministic offline fallback.
 """
 import logging
 import re
@@ -50,7 +50,7 @@ class CanonicalQueryFormulator:
         self,
         llm_client=None,
         llm_mode: str = "mock",
-        model_name: str = "meta/llama-3.3-70b-instruct",
+        model_name: str = "nvidia/nemotron-3-super-120b-a12b",
         api_key: Optional[str] = None
     ):
         self.llm_client = llm_client

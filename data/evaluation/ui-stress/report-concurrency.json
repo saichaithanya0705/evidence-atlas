@@ -1,0 +1,439 @@
+{
+  "generatedAt": "2026-09-28T00:18:30.519Z",
+  "targetUrl": "http://127.0.0.1:5173",
+  "ordinaryUserOnly": true,
+  "totalFlows": 21,
+  "succeeded": 20,
+  "failed": 1,
+  "latencyMs": {
+    "p50": 54188,
+    "p95": 98456,
+    "max": 122169
+  },
+  "concurrency": [
+    {
+      "concurrency": 2,
+      "attempted": 2,
+      "succeeded": 2,
+      "failed": 0,
+      "p95Ms": 71209,
+      "maxMs": 71209
+    },
+    {
+      "concurrency": 5,
+      "attempted": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "p95Ms": 69075,
+      "maxMs": 69075
+    },
+    {
+      "concurrency": 10,
+      "attempted": 10,
+      "succeeded": 10,
+      "failed": 0,
+      "p95Ms": 122169,
+      "maxMs": 122169
+    }
+  ],
+  "reversedYearValidation": {
+    "ok": true,
+    "text": "The start year must be earlier than or equal to the end year."
+  },
+  "results": [
+    {
+      "label": "sequential-1",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": true,
+      "durationMs": 41838,
+      "paperCount": 10,
+      "synthesisLength": 7066,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "sequential-2",
+      "query": "Do SGLT2 inhibitors reduce progression of chronic kidney disease?",
+      "ok": true,
+      "durationMs": 32567,
+      "paperCount": 10,
+      "synthesisLength": 4316,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "sequential-3",
+      "query": "Compare renal outcomes of dapagliflozin and canagliflozin in chronic kidney disease.",
+      "ok": true,
+      "durationMs": 27960,
+      "paperCount": 10,
+      "synthesisLength": 7244,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c2-user-1",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": true,
+      "durationMs": 71209,
+      "paperCount": 10,
+      "synthesisLength": 7066,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c2-user-2",
+      "query": "Do SGLT2 inhibitors reduce progression of chronic kidney disease?",
+      "ok": true,
+      "durationMs": 37818,
+      "paperCount": 10,
+      "synthesisLength": 5952,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c5-user-1",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": true,
+      "durationMs": 33618,
+      "paperCount": 10,
+      "synthesisLength": 7066,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c5-user-2",
+      "query": "Do SGLT2 inhibitors reduce progression of chronic kidney disease?",
+      "ok": true,
+      "durationMs": 39796,
+      "paperCount": 10,
+      "synthesisLength": 4316,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c5-user-3",
+      "query": "Compare renal outcomes of dapagliflozin and canagliflozin in chronic kidney disease.",
+      "ok": true,
+      "durationMs": 35634,
+      "paperCount": 10,
+      "synthesisLength": 7244,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c5-user-4",
+      "query": "What adverse kidney events are reported with SGLT2 inhibitors?",
+      "ok": true,
+      "durationMs": 65455,
+      "paperCount": 10,
+      "synthesisLength": 6316,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c5-user-5",
+      "query": "How do sodium glucose cotransporter inhibitors affect albuminuria?",
+      "ok": true,
+      "durationMs": 69075,
+      "paperCount": 10,
+      "synthesisLength": 5863,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-1",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": true,
+      "durationMs": 57787,
+      "paperCount": 10,
+      "synthesisLength": 7066,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-2",
+      "query": "Do SGLT2 inhibitors reduce progression of chronic kidney disease?",
+      "ok": true,
+      "durationMs": 48253,
+      "paperCount": 10,
+      "synthesisLength": 5952,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-3",
+      "query": "Compare renal outcomes of dapagliflozin and canagliflozin in chronic kidney disease.",
+      "ok": true,
+      "durationMs": 69646,
+      "paperCount": 10,
+      "synthesisLength": 7181,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-4",
+      "query": "What adverse kidney events are reported with SGLT2 inhibitors?",
+      "ok": true,
+      "durationMs": 54188,
+      "paperCount": 10,
+      "synthesisLength": 6316,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-5",
+      "query": "How do sodium glucose cotransporter inhibitors affect albuminuria?",
+      "ok": true,
+      "durationMs": 77809,
+      "paperCount": 10,
+      "synthesisLength": 6553,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-6",
+      "query": "What mechanisms explain renal protection from SGLT2 inhibition?",
+      "ok": true,
+      "durationMs": 72195,
+      "paperCount": 10,
+      "synthesisLength": 6724,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-7",
+      "query": "SGLT2 inhibitor randomized trials in patients with chronic kidney disease",
+      "ok": true,
+      "durationMs": 59632,
+      "paperCount": 10,
+      "synthesisLength": 6581,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-8",
+      "query": "Acute kidney injury risk during SGLT2 inhibitor treatment",
+      "ok": true,
+      "durationMs": 122169,
+      "paperCount": 10,
+      "synthesisLength": 6866,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-9",
+      "query": "Long term eGFR outcomes after SGLT2 inhibitor therapy",
+      "ok": true,
+      "durationMs": 98456,
+      "paperCount": 10,
+      "synthesisLength": 6721,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "c10-user-10",
+      "query": "Evidence for SGLT2 inhibitors in diabetic kidney disease",
+      "ok": true,
+      "durationMs": 45819,
+      "paperCount": 10,
+      "synthesisLength": 7327,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "label": "mobile-390",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": false,
+      "durationMs": 30219,
+      "error": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Research service connected', { exact: true }).first() to be visible\u001b[22m\n\u001b[2m    62 × locator resolved to hidden <span>Research service connected</span>\u001b[22m\n",
+      "alerts": [],
+      "apiResponses": [],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  ]
+}

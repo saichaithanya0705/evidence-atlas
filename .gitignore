@@ -35,6 +35,9 @@ __pycache__/
 data/models_cache/
 data/qdrant_storage/
 data/processed/
+data/full_index_staging/
+data/index_backups/
+data/temporary/
 !data/processed/.gitkeep
 *.lock
 *.pt
@@ -58,6 +61,10 @@ data/processed/
 *.7z
 *.rar
 PubMed_Phrases.tar.gz
+data/raw/pubmed_full.csv
+data/raw/pubmed_sample.csv
+data/raw/*.pre_ingest_backup.csv
+data/raw/pubmed_sample.synthetic_backup.csv
 
 # ------------------------------------------------------------------------------
 # 5. Frontend & Node.js Dependencies (React + Vite)
@@ -111,6 +118,9 @@ frontend/.playwright-cli/
 playwright-report/
 test-results/
 data/evaluation/latest*.json
+data/evaluation/actual_query_result.json
+data/evaluation/actual_research_result.json
+data/evaluation/ui-stress/*.jpg
 
 # ------------------------------------------------------------------------------
 # 7. Operating System & IDE Specific Files

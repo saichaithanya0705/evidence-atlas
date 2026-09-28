@@ -63,7 +63,7 @@ def _public_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
     """Return result metadata safe for non-administrator clients."""
     allowed = {
         "pmid", "title", "abstract", "journal", "year", "authors", "mesh_terms",
-        "study_type", "filter_satisfied",
+        "study_type",
     }
     return {key: value for key, value in candidate.items() if key in allowed}
 
@@ -71,7 +71,7 @@ def _public_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
 def _public_research_response(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Return only ordinary-user synthesis content, never diagnostics."""
     allowed = {
-        "query", "synthesis", "cited_pmids", "consensus_level", "evidence_gaps",
+        "query", "synthesis", "cited_pmids",
     }
     result = {key: value for key, value in payload.items() if key in allowed}
     result["evidence_table"] = []
@@ -95,8 +95,10 @@ def _get_research_service():
 
 @app.middleware("http")
 async def record_request_metrics(request: Request, call_next):
+    tracked_query = request.url.path in {"/research", "/search", "/analyze-query"}
     started = perf_counter()
-    telemetry.begin()
+    if tracked_query:
+        telemetry.begin()
     failed = False
     try:
         response = await call_next(request)
@@ -106,7 +108,8 @@ async def record_request_metrics(request: Request, call_next):
         failed = True
         raise
     finally:
-        telemetry.end((perf_counter() - started) * 1000.0, failed=failed)
+        if tracked_query:
+            telemetry.end((perf_counter() - started) * 1000.0, failed=failed)
 
 
 @app.on_event("shutdown")
@@ -120,7 +123,9 @@ def close_services() -> None:
 
 
 @app.get("/health")
-def health() -> Dict[str, Any]:
+def health(
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+) -> Dict[str, Any]:
     manifest_path = Path(settings.INDEX_MANIFEST_PATH)
     records = 0
     if manifest_path.exists():
@@ -131,10 +136,15 @@ def health() -> Dict[str, Any]:
     model_root = Path(settings.MODELS_CACHE_DIR)
     model_markers = list(model_root.glob("models--ncbi--MedCPT-*")) if model_root.exists() else []
     ready = records > 0 and Path(settings.BM25_INDEX_PATH).exists() and Path(settings.MESH_DICT_PATH).exists()
-    return {
+    public_status = {
         "status": "healthy" if ready else "degraded",
         "service": "Evidence Atlas",
         "version": app.version,
+    }
+    if not _admin_key_matches(x_admin_key):
+        return public_status
+    return {
+        **public_status,
         "qdrant_connected": Path(settings.QDRANT_STORAGE_PATH).exists(),
         "corpus_records_loaded": records,
         "mesh_service_loaded": Path(settings.MESH_DICT_PATH).exists(),
@@ -143,7 +153,10 @@ def health() -> Dict[str, Any]:
 
 
 @app.get("/metrics")
-def metrics() -> Dict[str, float | int]:
+def metrics(
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+) -> Dict[str, float | int]:
+    _require_admin(x_admin_key)
     return telemetry.snapshot()
 
 

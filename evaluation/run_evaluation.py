@@ -138,20 +138,33 @@ def run(query_file: Path, index_file: Path, top_k: int, answers_file: Path | Non
         raise FileNotFoundError(f"BM25 index not found: {index_file}. Run start.bat or build the corpus artifacts first.")
     bm25 = BM25Index.load(index_file)
     query_service = QueryAnalysisService()
+    is_demo_benchmark = query_file.name == DEFAULT_QUERY_FILE.name
 
     def predict_route(query: str) -> str:
         plan, _ = query_service.build_query_plan(query, generate_embeddings=False)
         return plan.route
 
     report: dict[str, Any] = {
-        "benchmark": "bundled demo corpus; manually assigned judgments",
+        "benchmark": (
+            "bundled synthetic demo corpus; manually assigned judgments"
+            if is_demo_benchmark
+            else "caller-selected corpus benchmark; inspect query labels and provenance"
+        ),
         "query_file": str(query_file.relative_to(PROJECT_ROOT)) if query_file.is_relative_to(PROJECT_ROOT) else str(query_file),
         "bm25_index": str(index_file.relative_to(PROJECT_ROOT)) if index_file.is_relative_to(PROJECT_ROOT) else str(index_file),
-        "limitations": [
-            "This is a small fixture benchmark, not a representative PubMed relevance study.",
-            "Bundled fixture PMIDs and abstracts are demo records and are not verified against PubMed.",
-            "Classical ranking metrics do not establish clinical correctness or claim grounding.",
-        ],
+        "limitations": (
+            [
+                "This is a small fixture benchmark, not a representative PubMed relevance study.",
+                "Bundled fixture PMIDs and abstracts are demo records and are not verified against PubMed.",
+                "Classical ranking metrics do not establish clinical correctness or claim grounding.",
+            ]
+            if is_demo_benchmark
+            else [
+                "This pilot benchmark is small and its labels are provisional pending independent biomedical review.",
+                "The active corpus is query-focused rather than representative of all PubMed.",
+                "Classical ranking metrics do not establish clinical correctness or claim grounding.",
+            ]
+        ),
         **evaluate_retrieval_and_router(queries, bm25.search, predict_route, top_k),
         "citations": evaluate_citation_artifact(answers_file) if answers_file else {"status": "not_run", "reason": "Pass --answers with saved research responses to check citation IDs and exact evidence quotes."},
     }

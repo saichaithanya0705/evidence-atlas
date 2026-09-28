@@ -1,0 +1,53 @@
+{
+  "generatedAt": "2026-09-28T00:40:26.910Z",
+  "status": "passed",
+  "ordinaryUserOnly": true,
+  "activeCorpusRecords": 29939,
+  "totalFlows": 21,
+  "succeeded": 21,
+  "failed": 0,
+  "latencyMs": {
+    "p50": 57787,
+    "p95": 98456,
+    "max": 122169
+  },
+  "concurrency": [
+    {"users": 2, "attempted": 2, "succeeded": 2, "failed": 0, "p95Ms": 71209},
+    {"users": 5, "attempted": 5, "succeeded": 5, "failed": 0, "p95Ms": 69075},
+    {"users": 10, "attempted": 10, "succeeded": 10, "failed": 0, "p95Ms": 122169}
+  ],
+  "desktopFlows": {
+    "report": "report-concurrency.json",
+    "passed": 20,
+    "applicationFailures": 0,
+    "http5xx": 0
+  },
+  "mobileFlow": {
+    "report": "report.json",
+    "viewport": "390x844",
+    "passed": true,
+    "horizontalOverflow": false,
+    "durationMs": 78515,
+    "verifiedAfterFinalRestart": true
+  },
+  "adminBoundary": {
+    "passed": true,
+    "assertedAbsentForOrdinaryUsers": [
+      "query interpretation",
+      "evidence table",
+      "audit trail",
+      "why this paper",
+      "citation precision",
+      "evidence spans",
+      "provenance"
+    ]
+  },
+  "inputValidation": {
+    "reversedYearRange": "passed"
+  },
+  "notes": [
+    "The first mobile attempt in report-concurrency.json was a harness-only false failure because the connected-status element is intentionally hidden by responsive CSS.",
+    "The corrected mobile-only rerun in report.json waits for the element to be attached and completed the same real research flow successfully.",
+    "Every successful flow returned 10 papers and a synthesis through the real /research endpoint."
+  ]
+}

@@ -261,7 +261,20 @@ def prepare_and_run(offline: bool = False, dry_run: bool = False) -> None:
     pipeline_commands = [
         ("Profile source corpus", [python, "pipelines/inspect_dataset.py", "--input", "data/raw/pubmed_sample.csv", "--output", "data/manifests/dataset_profile.json"]),
         ("Preprocess corpus", [python, "pipelines/preprocess.py", "--input", "data/raw/pubmed_sample.csv", "--output-parquet", "data/processed/cleaned_pubmed.parquet", "--output-jsonl", "data/processed/cleaned_pubmed.jsonl", "--manifest", "data/manifests/preprocessing_manifest.json"]),
-        ("Build MedCPT article embeddings", [python, "pipelines/build_embeddings.py", "--input", "data/processed/cleaned_pubmed.parquet", "--output-dir", "data/processed"]),
+        (
+            "Build MedCPT article embeddings",
+            [
+                python,
+                "pipelines/build_embeddings.py",
+                "--input",
+                "data/processed/cleaned_pubmed.parquet",
+                "--output-dir",
+                "data/processed",
+                "--resume",
+                "--checkpoint-every",
+                "10",
+            ],
+        ),
         ("Build BM25 index", [python, "pipelines/build_bm25.py", "--corpus", "data/processed/cleaned_pubmed.parquet", "--output", "data/processed/bm25_index.pkl"]),
         ("Build MeSH dictionary", [python, "pipelines/build_mesh_dict.py", "--input", "data/processed/cleaned_pubmed.jsonl", "--output", "data/processed/mesh_dictionary.json"]),
         ("Build paper-MeSH graph", [python, "pipelines/build_mesh_graph.py", "--input", "data/processed/cleaned_pubmed.jsonl", "--output-pickle", "data/processed/mesh_graph.gpickle", "--output-json", "data/processed/mesh_graph.json", "--manifest", "data/manifests/graph_manifest.json"]),

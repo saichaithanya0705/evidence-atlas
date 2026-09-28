@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-09-28T00:40:26.910Z",
+  "targetUrl": "http://127.0.0.1:5173",
+  "ordinaryUserOnly": true,
+  "totalFlows": 1,
+  "succeeded": 1,
+  "failed": 0,
+  "latencyMs": {
+    "p50": 78515,
+    "p95": 78515,
+    "max": 78515
+  },
+  "concurrency": [],
+  "reversedYearValidation": {
+    "ok": true,
+    "text": "The start year must be earlier than or equal to the end year."
+  },
+  "results": [
+    {
+      "label": "mobile-390",
+      "query": "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+      "ok": true,
+      "durationMs": 78515,
+      "paperCount": 10,
+      "synthesisLength": 7066,
+      "apiResponses": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:8000/research"
+        }
+      ],
+      "consoleErrors": [],
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  ]
+}

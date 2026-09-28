@@ -35,6 +35,47 @@ COLLECTION_NAME = "medical_abstracts"
 ARTICLE_ENCODER_MODEL = "ncbi/MedCPT-Article-Encoder"
 
 
+def scroll_point_ids(client: QdrantClient, collection_name: str) -> list[int | str]:
+    """Return every stored point id without loading payloads or vectors."""
+    point_ids: list[int | str] = []
+    offset = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection_name,
+            limit=1000,
+            offset=offset,
+            with_payload=False,
+            with_vectors=False,
+        )
+        point_ids.extend(point.id for point in points)
+        if offset is None:
+            return point_ids
+
+
+def remove_existing_collection(client: QdrantClient, collection_name: str) -> None:
+    """Empty then remove an embedded collection so recreated IDs cannot survive.
+
+    Some embedded Qdrant versions can retain old points when a collection is
+    deleted and recreated immediately in the same local store.  Explicitly
+    deleting every point first avoids mixing a previous corpus into the next
+    index build.
+    """
+    old_ids = scroll_point_ids(client, collection_name)
+    for offset in range(0, len(old_ids), 1000):
+        client.delete(
+            collection_name=collection_name,
+            points_selector=models.PointIdsList(points=old_ids[offset : offset + 1000]),
+            wait=True,
+        )
+    remaining = scroll_point_ids(client, collection_name)
+    if remaining:
+        raise RuntimeError(
+            f"Could not clear existing Qdrant collection {collection_name!r}; "
+            f"{len(remaining)} points remain"
+        )
+    client.delete_collection(collection_name)
+
+
 def get_dir_size(path: Path) -> int:
     """Calculates recursive directory size in bytes."""
     total = 0
@@ -168,7 +209,7 @@ def index_qdrant_collection(
         existing_collections = [c.name for c in client.get_collections().collections]
         if COLLECTION_NAME in existing_collections:
             logger.info("Recreating existing collection '%s'", COLLECTION_NAME)
-            client.delete_collection(COLLECTION_NAME)
+            remove_existing_collection(client, COLLECTION_NAME)
 
         logger.info("Creating Qdrant collection '%s' with dense and BM25 sparse vectors", COLLECTION_NAME)
         client.create_collection(
@@ -272,6 +313,17 @@ def index_qdrant_collection(
         col_info = client.get_collection(COLLECTION_NAME)
         points_count = col_info.points_count
         logger.info("Qdrant collection populated successfully. Total points: %d", points_count)
+        expected_ids = {int(value) for value in df["pmid"].tolist()}
+        stored_ids = {int(value) for value in scroll_point_ids(client, COLLECTION_NAME)}
+        if stored_ids != expected_ids:
+            unexpected = sorted(stored_ids - expected_ids)[:10]
+            missing = sorted(expected_ids - stored_ids)[:10]
+            raise RuntimeError(
+                "Qdrant point IDs do not exactly match the cleaned corpus: "
+                f"stored={len(stored_ids)}, expected={len(expected_ids)}, "
+                f"unexpected_sample={unexpected}, missing_sample={missing}"
+            )
+        points_count = len(stored_ids)
 
     finally:
         client.close()
@@ -336,7 +388,7 @@ def index_qdrant_collection(
             "engine": "qdrant-client-embedded",
             "storage_path": str(qdrant_path),
             "collection_name": COLLECTION_NAME,
-            "points_count": total_records,
+            "points_count": points_count,
             "vector_names": ["dense", "bm25"],
             "indexed_payload_fields": [
                 {"field_name": "year", "schema_type": "integer"},

@@ -212,7 +212,7 @@ class AdaptiveComplexityRouter:
         year_max: Optional[int] = None,
         intent: Optional[str] = None,
         llm_client: Optional[Any] = None,
-        model_name: str = "meta/llama-3.3-70b-instruct",
+        model_name: str = "nvidia/nemotron-3-super-120b-a12b",
         llm_mode: str = "mock",
     ) -> RoutingDecision:
         """

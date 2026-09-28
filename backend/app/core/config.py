@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     )
     NVIDIA_API_KEY: Optional[SecretStr] = Field(default=None, description="NVIDIA API Key")
     NVIDIA_BASE_URL: str = Field(default="https://integrate.api.nvidia.com/v1")
-    NVIDIA_MODEL_NAME: str = Field(default="meta/llama-3.3-70b-instruct")
+    NVIDIA_MODEL_NAME: str = Field(default="nvidia/nemotron-3-super-120b-a12b")
     LLM_MODE: str = Field(default="mock", description="'nim', 'mock', or 'openai'")
     LLM_TEMPERATURE: float = Field(default=0.1)
     LLM_MAX_TOKENS: int = Field(default=2048)

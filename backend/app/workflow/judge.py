@@ -193,7 +193,7 @@ class EvidenceSufficiencyJudge:
         try:
             if hasattr(client, "chat"):
                 response = client.chat.completions.create(
-                    model=getattr(self.settings, "NVIDIA_MODEL_NAME", "meta/llama-3.3-70b-instruct"),
+                    model=getattr(self.settings, "NVIDIA_MODEL_NAME", "nvidia/nemotron-3-super-120b-a12b"),
                     messages=messages,
                     temperature=0,
                     max_tokens=300,
@@ -224,4 +224,3 @@ class EvidenceSufficiencyJudge:
             rationale=llm_result["rationale"] or deterministic.rationale,
             llm_grade=llm_result["grade"],
         )
-

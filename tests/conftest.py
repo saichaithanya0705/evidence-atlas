@@ -85,6 +85,11 @@ def test_client(synthetic_records, mock_catalog):
     Otherwise, constructs a contract-validating mock FastAPI application.
     """
     try:
+        # Contract/scenario tests are intentionally isolated from whichever
+        # real corpus is active in data/raw. Opt in only for an explicit live
+        # application test run; dedicated boundary tests use real_app_client.
+        if os.getenv("EVIDENCE_ATLAS_TEST_REAL_APP") != "1":
+            raise ImportError("using deterministic contract-test application")
         # The contract suite exercises diagnostic/admin fields explicitly; the
         # application itself remains public-by-default and is tested with an
         # invalid/missing header in dedicated boundary checks.
@@ -282,3 +287,15 @@ def test_client(synthetic_records, mock_catalog):
             }
             
         return TestClient(mock_app)
+
+
+@pytest.fixture()
+def real_app_client():
+    """Use the production FastAPI app without coupling all contract tests to it."""
+    from backend.app.core.config import get_settings
+    from backend.app.main import app
+    from starlette.testclient import TestClient
+
+    get_settings.cache_clear()
+    with TestClient(app, headers={"X-Admin-Key": "test-admin-key"}) as client:
+        yield client

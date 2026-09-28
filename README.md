@@ -11,7 +11,9 @@ Requirements: Windows 10 or 11, Python 3.10 or later (Python 3.11 is recommended
 3. Open <http://127.0.0.1:5173>. FastAPI health is checked at <http://127.0.0.1:8000/health>.
 4. Press Ctrl+C in the launcher window to stop the API and frontend processes. Logs are written to `logs/backend.log` and `logs/frontend.log`.
 
-Setup stages are safe to repeat. Existing `.env` and raw dataset files are preserved. Embeddings are reused only when their corpus hash matches; derived preprocessing/index files are rebuilt as needed. Qdrant uses local embedded storage under `data/qdrant_storage`.
+Setup stages are safe to repeat. Existing `.env` and raw dataset files are preserved. Embeddings are reused only when their corpus hash matches; a matching interrupted embedding build resumes from durable checkpoints. Derived preprocessing/index files are rebuilt as needed. Qdrant uses local embedded storage under `data/qdrant_storage`.
+
+To acquire original PubMed records from the root `PubMed_Phrases.tar.gz` before rebuilding, run `start.bat --ingest`. A normal `start.bat` deliberately reuses the existing dataset and does not redownload it. The archive supplies phrase-to-PMID mappings; `--ingest` then fetches canonical XML records from the official NCBI E-utilities API and writes the normalized CSV before indexing it. `PUBMED_INGEST_LIMIT` controls the requested upper bound (default `100000`; the archive can contain fewer unique PMIDs), for example `set PUBMED_INGEST_LIMIT=1000` followed by `start.bat --ingest` for a shorter CPU-only build. This online option cannot be combined with `--offline`.
 
 For a deliberate model-offline run, use `start.bat --offline`. This never downloads MedCPT models and uses complete local model caches when available. If required weights are missing, the run is marked `degraded-offline` in `data/manifests/assets_manifest.json` and may use deterministic mock embeddings. That mode is only for software development; results are not MedCPT results. npm may still need registry access to install frontend packages.
 
@@ -26,7 +28,7 @@ The copied `.env` starts with `LLM_MODE=mock`, so an NVIDIA key is not required 
 ```dotenv
 NVIDIA_API_KEY=your-key
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-NVIDIA_MODEL_NAME=meta/llama-3.3-70b-instruct
+NVIDIA_MODEL_NAME=nvidia/nemotron-3-super-120b-a12b
 LLM_MODE=nim
 ```
 
@@ -34,9 +36,9 @@ Keep the key in `.env`; do not commit it. `.env` is excluded from Git. The key i
 
 ## Corpus and model setup
 
-`python scripts/setup_assets.py` prepares `data/raw/pubmed_sample.csv`, creates expected directories, verifies and caches `ncbi/MedCPT-Query-Encoder`, `ncbi/MedCPT-Article-Encoder`, and `ncbi/MedCPT-Cross-Encoder`, and writes `data/manifests/assets_manifest.json`. Normal mode fails with a nonzero exit code if a model cannot be downloaded and loaded. Use `--offline` only when intentionally working without model downloads. Do not use `--offline` to claim real MedCPT retrieval quality.
+`python scripts/setup_assets.py` validates/preserves `data/raw/pubmed_sample.csv`, creates expected directories, verifies and caches `ncbi/MedCPT-Query-Encoder`, `ncbi/MedCPT-Article-Encoder`, and `ncbi/MedCPT-Cross-Encoder`, and writes `data/manifests/assets_manifest.json`. Normal mode fails with a nonzero exit code if a model cannot be downloaded and loaded. Use `--offline` only when intentionally working without model downloads. Do not use `--offline` to claim real MedCPT retrieval quality.
 
-The bundled `data/raw/pubmed_sample.csv` is a small demo/test corpus (30 fixture records). Its abstracts and PMID-like identifiers are not verified against PubMed and must not be treated as authoritative biomedical records. The repository does not define a bulk PubMed download source. To use a real corpus, provide a properly licensed/authorized CSV with at least `pmid`, `title`, and `abstract` columns, plus available metadata such as authors, publication date/year, MeSH terms, keywords, and publication type. The setup script preserves an existing CSV; `--force` replaces it with the bundled demo fixture, so do not use that flag when maintaining a real corpus.
+The verified full-corpus run used the complete relevant PMID subset exposed by the supplied phrase archive: 29,995 usable real NCBI PubMed abstracts, deduplicated to 29,939 indexed records. The downloaded abstracts and generated indexes are intentionally not committed to Git; a fresh checkout must run `start.bat --ingest` with `PubMed_Phrases.tar.gz` present to reproduce that corpus. `data/manifests/pubmed_ingestion_manifest.json`, `preprocessing_manifest.json`, and `index_manifest.json` record the verified source, transformations, hashes, and exact point count. Any small repository fixture must not be treated as biomedical evidence. The full official PubMed baseline linked in the implementation plan is tens of millions of citations, so this workstation-oriented corpus remains below the plan's preferred 100k-250k controlled subset. NLM remains the source of record, abstracts may be copyrighted, and this project does not imply NLM/NIH/HHS endorsement.
 
 Run M1 indexing manually, if needed, from the project root:
 
@@ -44,7 +46,7 @@ Run M1 indexing manually, if needed, from the project root:
 python scripts/setup_assets.py
 python pipelines/inspect_dataset.py
 python pipelines/preprocess.py
-python pipelines/build_embeddings.py
+python pipelines/build_embeddings.py --resume --checkpoint-every 10
 python pipelines/build_bm25.py
 python pipelines/build_mesh_dict.py
 python pipelines/build_mesh_graph.py
@@ -98,3 +100,9 @@ python -m pytest
 ```
 
 The application uses local files and embedded Qdrant storage. No Docker service or container is required.
+
+The active 29,939-point collection is larger than Qdrant's recommended embedded-local threshold of 20,000 points. It is correct and usable for this no-Docker workstation setup, but concurrent searches are slower and local payload indexes are not accelerated; a Qdrant server or managed Qdrant deployment is the appropriate production scaling path.
+
+## UI stress validation
+
+With the API and Vite UI running, execute `npm run test:ui-stress` from `frontend/`. The test uses fresh ordinary-user browser contexts, exercises sequential, 2-user, 5-user, 10-user, and 390-pixel mobile flows, and fails if administrator-only analysis, traces, provenance, evidence spans, or retrieval diagnostics appear. The latest consolidated result is `data/evaluation/ui-stress/final-report.json`.

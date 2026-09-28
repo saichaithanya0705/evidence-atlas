@@ -55,6 +55,33 @@ def test_claim_validator_rejects_unsupported_numbers_but_accepts_record_year():
     assert supported_year.valid
 
 
+def test_deterministic_source_line_with_et_al_abbreviation_remains_grounded():
+    span = (
+        "Accordingly, the 0.44% reduction found by Kohan et al. in patients "
+        "with chronic kidney disease might have been anticipated."
+    )
+    record = _record(span)
+    text = EvidenceSynthesizer.deterministic_text("kidney outcomes", [record], [], False)
+
+    audit = ClaimToSpanValidator().validate(text, [record])
+
+    assert audit.valid
+    assert not audit.unsupported_claims
+
+
+def test_pico_extracts_full_expanded_sglt2_intervention_and_clean_population():
+    from backend.app.query.extractor import PICOExtractor
+
+    plan = PICOExtractor().extract(
+        "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
+        "What are the kidney outcomes of Sodium-Glucose Cotransporter-2 inhibitors in chronic kidney disease?",
+    )
+
+    assert plan.intervention == "Sodium-Glucose Cotransporter-2 inhibitors"
+    assert plan.population == "chronic kidney disease"
+    assert plan.outcome == "Kidney outcomes"
+
+
 def test_extraction_propagates_year_and_synthesis_context_includes_comparison_fields():
     candidate = RetrievalCandidate(
         pmid="12345",

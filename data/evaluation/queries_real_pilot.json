@@ -1,0 +1,42 @@
+[
+  {
+    "id": "sglt2_ckd_outcomes",
+    "query": "kidney outcomes of SGLT2 inhibitors in chronic kidney disease",
+    "relevant_pmids": ["25805666", "25059406", "28827404"],
+    "expected_route": "SIMPLE",
+    "label_source": "manual title-and-abstract review",
+    "provisional": true
+  },
+  {
+    "id": "sglt2_acute_kidney_injury",
+    "query": "acute kidney injury risk with SGLT2 inhibitors",
+    "relevant_pmids": ["28827404"],
+    "expected_route": "SIMPLE",
+    "label_source": "manual title-and-abstract review",
+    "provisional": true
+  },
+  {
+    "id": "canagliflozin_stage3_nephropathy",
+    "query": "canagliflozin efficacy and safety in stage 3 nephropathy",
+    "relevant_pmids": ["25059406"],
+    "expected_route": "SIMPLE",
+    "label_source": "manual title-and-abstract review",
+    "provisional": true
+  },
+  {
+    "id": "sglt2_serum_uric_acid",
+    "query": "effect of SGLT2 inhibitors on serum uric acid in type 2 diabetes",
+    "relevant_pmids": ["28749169"],
+    "expected_route": "SIMPLE",
+    "label_source": "manual title-and-abstract review",
+    "provisional": true
+  },
+  {
+    "id": "sglt2_magnesium_meta_analysis",
+    "query": "SGLT2 inhibitors serum magnesium meta-analysis randomized trials",
+    "relevant_pmids": ["27628105"],
+    "expected_route": "MODERATE",
+    "label_source": "manual title-and-abstract review",
+    "provisional": true
+  }
+]

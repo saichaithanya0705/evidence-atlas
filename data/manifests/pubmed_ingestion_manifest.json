@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-09-27T15:06:31.428949+00:00",
+  "source": "NCBI PubMed E-utilities",
+  "source_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+  "phrase_archive": "D:\\projects\\capstone\\PubMed_Phrases.tar.gz",
+  "phrase_archive_sha256": "69dc5d323c13647f321c22410960e2cd99e66139c1d50122d6dc03c7427b066c",
+  "phrases": [
+    "sglt2 inhibitor",
+    "chronic kidney disease"
+  ],
+  "phrase_match_counts": {
+    "chronic kidney disease": 29867,
+    "sglt2 inhibitor": 291
+  },
+  "requested_pmids": 250,
+  "usable_abstract_records": 249,
+  "unusable_or_missing_records": 1,
+  "output": "D:\\projects\\capstone\\data\\raw\\pubmed_sample.csv"
+}

@@ -139,7 +139,7 @@ def test_citation_check_reads_research_response_and_does_not_trust_reported_prec
 
 def test_benchmark_relevance_labels_are_present_in_bundled_demo_corpus():
     root = Path(__file__).resolve().parents[2]
-    with (root / "data" / "raw" / "pubmed_sample.csv").open(encoding="utf-8", newline="") as stream:
+    with (root / "tests" / "fixtures" / "synthetic_pubmed.csv").open(encoding="utf-8", newline="") as stream:
         pmids = {row["pmid"] for row in csv.DictReader(stream)}
     benchmark = json.loads((root / "data" / "evaluation" / "queries.json").read_text(encoding="utf-8"))
 

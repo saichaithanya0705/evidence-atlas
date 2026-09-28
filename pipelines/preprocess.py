@@ -30,10 +30,10 @@ COLUMN_ALIASES = {
     "abstract": ["abstract", "Abstract", "abstract_text"],
     "authors": ["authors", "Authors", "author_list"],
     "journal": ["journal", "Journal", "journal_title", "source"],
-    "pubdate": ["publication_date", "pubdate", "pub_date", "date", "year"],
+    "pubdate": ["publication_date_raw", "publication_date", "pubdate", "pub_date", "date", "year"],
     "mesh": ["mesh_terms", "mesh", "MeSH", "mesh_headings"],
     "keywords": ["keywords", "Keywords", "author_keywords"],
-    "pub_type": ["study_type", "publication_type", "publication_types", "pub_type"],
+    "pub_type": ["publication_types", "publication_type", "pub_type", "study_type"],
     "doi": ["doi", "DOI"],
 }
 
@@ -51,8 +51,12 @@ STUDY_DESIGN_PATTERNS = [
 def resolve_columns(df_columns: List[str]) -> Dict[str, str]:
     """Maps standardized canonical keys to actual CSV column names."""
     mapping = {}
+    columns_by_lower = {column.lower(): column for column in df_columns}
     for canonical, aliases in COLUMN_ALIASES.items():
-        found = next((col for col in df_columns if col in aliases or col.lower() in [a.lower() for a in aliases]), None)
+        # Alias order is meaningful: prefer audit-preserving source fields
+        # such as publication_date_raw and publication_types when both raw and
+        # normalized columns are supplied by an ingester.
+        found = next((columns_by_lower.get(alias.lower()) for alias in aliases if alias.lower() in columns_by_lower), None)
         if found:
             mapping[canonical] = found
     return mapping
