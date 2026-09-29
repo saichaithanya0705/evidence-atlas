@@ -27,16 +27,18 @@ _CONTEXT_DEPENDENT = re.compile(
 _SHORT_INTERROGATIVE = re.compile(r"^\s*(why|how|what|which|where|when|who)\b", re.I)
 _TOPIC_WORDS = {
     "adverse", "benefit", "benefits", "cause", "causes", "complication", "complications", "contraindication",
-    "contraindications", "diagnosis", "dose", "dosage", "dosing", "effect", "effects", "effective",
+    "condition", "conditions", "contraindications", "diagnosis", "disease", "diseases", "dose", "dosage",
+    "dosing", "drug", "drugs", "effect", "effects", "effective",
     "effectiveness", "efficacy", "event", "events", "incidence", "interaction", "interactions", "mechanism",
-    "mechanisms", "monitoring", "outcome", "outcomes", "prevalence", "prevention", "prognosis", "risk",
-    "risks", "safety", "side", "symptom", "symptoms", "therapy", "treatment", "treatments", "toxicity",
-    "toxicities",
+    "mechanisms", "medication", "medications", "medicine", "medicines", "monitoring", "outcome", "outcomes",
+    "patient", "patients", "prevalence", "prevention", "prognosis", "risk", "risks", "safety", "side",
+    "symptom", "symptoms", "therapy", "treatment", "treatments", "toxicity", "toxicities",
 }
 _QUESTION_FILLER_WORDS = {
-    "a", "all", "an", "and", "any", "are", "common", "did", "do", "does", "expected", "general",
-    "generally", "have", "has", "in", "is", "major", "of", "or", "overall", "possible", "potential",
-    "reported", "serious", "the", "what", "which",
+    "a", "all", "am", "an", "and", "any", "are", "can", "common", "could", "did", "do", "does",
+    "expected", "general", "generally", "had", "have", "has", "in", "is", "may", "might", "major",
+    "of", "or", "overall", "possible", "potential", "reported", "serious", "shall", "should", "the",
+    "was", "were", "what", "which", "will", "would",
 }
 _GENERIC_MODIFIERS = {
     "acute", "adverse", "best", "chronic", "common", "expected", "general", "generally", "long", "mild",
@@ -51,6 +53,9 @@ _ACTION_VERBS = {
     "result", "results", "show", "shows", "treat", "treats",
 }
 _COPULAS = {"am", "are", "is", "was", "were"}
+_AUXILIARIES = {"can", "could", "did", "do", "does", "had", "has", "have", "may", "might", "shall", "should", "will", "would"}
+_AUXILIARY_PREDICATES = _ACTION_VERBS | {"experience", "experiences", "have", "has", "had", "suffer", "suffers"}
+_SUBJECT_PRONOUNS = {"he", "her", "him", "i", "it", "me", "she", "they", "them", "us", "we", "you"}
 
 
 class ConversationAgent:
@@ -180,6 +185,16 @@ class ConversationAgent:
                 subject_after = any(item not in ignored for item in words[index + 1 :])
                 if (topic_before and subject_after) or (topic_after and subject_before):
                     return True
+        subject_ignored = ignored | _AUXILIARIES | _SUBJECT_PRONOUNS
+        for auxiliary_index, word in enumerate(words):
+            if word not in _AUXILIARIES:
+                continue
+            for predicate_index in range(auxiliary_index + 1, len(words)):
+                if words[predicate_index] in _AUXILIARY_PREDICATES:
+                    subject = words[auxiliary_index + 1 : predicate_index]
+                    if any(item not in subject_ignored for item in subject):
+                        return True
+                    break
         return False
 
     @staticmethod

@@ -306,6 +306,49 @@ def test_provider_failure_keeps_biomedical_question_with_a_named_topic_actionabl
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "Can metformin have side effects?",
+        "Does aspirin have long-term risks?",
+        "Do statins cause adverse events?",
+        "Could semaglutide increase interaction risks?",
+        "Will aspirin have long-term risks?",
+    ],
+)
+def test_provider_failure_accepts_auxiliary_questions_with_concrete_subjects(question):
+    from backend.app.conversation.agent import ConversationAgent
+
+    result = ConversationAgent(
+        settings(), completion_client=FakeCompletionClient(error=TimeoutError())
+    ).plan_turn(question, ConversationHistoryWindow(current_message=question))
+
+    assert result.action is AgentAction.RESEARCH
+    assert result.standalone_query == question
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "Can it have side effects?",
+        "Does that cause risks?",
+        "Could have side effects?",
+        "Could cause risks?",
+        "Will cause risks?",
+    ],
+)
+def test_provider_failure_clarifies_auxiliary_questions_without_concrete_subject(fragment):
+    from backend.app.conversation.agent import ConversationAgent
+
+    result = ConversationAgent(
+        settings(), completion_client=FakeCompletionClient(error=TimeoutError())
+    ).plan_turn(fragment, ConversationHistoryWindow(current_message=fragment))
+
+    assert result.action is AgentAction.CLARIFY
+    assert result.standalone_query is None
+    assert result.message
+
+
+@pytest.mark.parametrize(
     "content",
     [
         json.dumps(
