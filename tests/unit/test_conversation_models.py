@@ -163,6 +163,19 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
     assert response.model_dump(mode="json")["answer_status"] == "LIMITED"
 
 
+def test_failed_turn_record_keeps_failure_status_without_fabricating_agent_action():
+    from backend.app.conversation.models import ConversationTurnRecord
+
+    failed = ConversationTurnRecord(
+        turn_id="t-failed", sequence=2, user_message="Question", action=None,
+        answer_status="FAILED", assistant_message="A technical failure occurred.",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    assert failed.action is None
+    assert failed.answer_status.value == "FAILED"
+
+
 def test_evidence_gap_context_requires_complete_bounded_planner_inputs():
     values = {
         "standalone_question": "What are the safety outcomes?",

@@ -93,7 +93,7 @@ class ConversationService:
         conversation = page["conversation"]
         turns = [ConversationTurnRecord(
             turn_id=item["id"], sequence=item["ordinal"], user_message=item["user_message"],
-            action=item["agent_action"] or AgentAction.CLARIFY,
+            action=item["agent_action"],
             answer_status=item["answer_status"], assistant_message=item["assistant_message"], created_at=item["created_at"],
         ) for item in page["turns"]]
         following = offset + len(turns)

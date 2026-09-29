@@ -123,7 +123,7 @@ class ConversationTurnRecord(_StrictModel):
     turn_id: str = Field(max_length=100)
     sequence: int = Field(ge=1)
     user_message: str = Field(max_length=4000)
-    action: AgentAction
+    action: AgentAction | None
     answer_status: AnswerStatus | None = None
     assistant_message: str | None = Field(default=None, max_length=4000)
     created_at: datetime

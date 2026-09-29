@@ -152,7 +152,7 @@ class ConversationStore:
             if row is None or row["status"] != "running":
                 raise ValueError("Conversation turn is not running")
             db.execute(
-                "UPDATE conversation_turns SET status='failed',assistant_message=?,audit_run_id=?,completed_at=? WHERE id=?",
+                "UPDATE conversation_turns SET status='failed',answer_status='FAILED',assistant_message=?,audit_run_id=?,completed_at=? WHERE id=?",
                 (assistant_message, audit_run_id, completed, turn_id),
             )
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (completed, row["conversation_id"]))

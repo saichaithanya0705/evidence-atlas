@@ -285,6 +285,10 @@ def test_agent_failure_is_persisted_as_failed_turn_and_failed_audit(tmp_path):
     with connect_db(path) as db:
         turn = dict(db.execute("SELECT * FROM conversation_turns").fetchone())
     assert turn["status"] == "failed"
+    assert turn["answer_status"] == "FAILED"
+    detail = service.detail(conversation["id"], account, limit=100, offset=0)
+    assert detail.turns[0].action is None
+    assert detail.turns[0].answer_status is AnswerStatus.FAILED
     assert "provider secret" not in (turn["assistant_message"] or "")
     assert audit.detail(turn["audit_run_id"])["status"] == "failed"
 

@@ -111,7 +111,42 @@ def test_turn_route_returns_the_completed_public_response(client):
 
     assert response.status_code == 200
     assert response.json()["action"] == "CLARIFY"
+    assert response.json()["answer_status"] == "INSUFFICIENT"
     assert response.json()["assistant_message"] == "Please name the outcome."
+
+
+def test_failed_turn_remains_failed_after_api_reload(client):
+    from backend.app.conversation.routes import get_conversation_service
+    from backend.app.conversation.service import ConversationService
+    from backend.app.storage.audits import AuditStore
+
+    headers = _headers(client)
+    conversation_id = client.post("/conversations", json={}, headers=headers).json()["conversation_id"]
+    path = get_settings().APP_DATABASE_PATH
+
+    class BrokenAgent:
+        def plan_turn(self, message, history):
+            raise RuntimeError("private provider error")
+
+    class NoResearch:
+        pass
+
+    service = ConversationService(
+        store=ConversationStore(path), audit=AuditStore(path), agent=BrokenAgent(), research=NoResearch(),
+    )
+    client.app.dependency_overrides[get_conversation_service] = lambda: service
+    try:
+        failed = client.post(
+            f"/conversations/{conversation_id}/turns", json={"message": "A technical failure"}, headers=headers,
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_conversation_service, None)
+
+    assert failed.status_code == 503
+    reloaded = client.get(f"/conversations/{conversation_id}", headers=headers).json()["turns"][0]
+    assert reloaded["action"] is None
+    assert reloaded["answer_status"] == "FAILED"
+    assert "private provider error" not in reloaded["assistant_message"]
 
 
 def test_running_turn_is_reported_as_conflict_without_second_storage_record(client):

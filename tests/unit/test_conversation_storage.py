@@ -92,6 +92,7 @@ def test_owned_conversation_title_validation_pagination_and_turn_lifecycle(tmp_p
     assert two["ordinal"] == 2
     failed = store.fail_turn("turn-2", assistant_message="Please retry")
     assert failed["status"] == "failed" and failed["audit_run_id"] is None
+    assert failed["answer_status"] == "FAILED"
     three = store.begin_turn(first["id"], alice["id"], "Retry", turn_id="turn-3")
     assert three["ordinal"] == 3
     detail = store.detail_for_account(first["id"], alice["id"], limit=2, offset=1)
