@@ -5,6 +5,7 @@ import pytest
 
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import AnswerStatus, EvidenceRecord, RetrievalCandidate
+from backend.app.models.research_plan import CoverageStatus, SubquestionCoverage
 from backend.app.conversation.models import CorrectiveResearchProposal, EvidenceGapContext
 from backend.app.query.models import PICOModel, QueryPlan
 from backend.app.query.query_service import QueryAnalysisService
@@ -12,6 +13,7 @@ from backend.app.query.router import AdaptiveComplexityRouter
 from backend.app.retrieval.hybrid import HybridRetriever, reciprocal_rank_fusion
 from backend.app.retrieval.reranker import MedCPTReranker
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
+from backend.app.workflow.planning import ResearchPlanner
 from backend.app.workflow.service import ResearchService
 from backend.app.workflow.synthesis import EvidenceSynthesizer, SynthesisResult
 
@@ -518,7 +520,7 @@ def test_failed_gap_reviewer_uses_deterministic_correction_and_maps_limited():
     trace = service.get_trace("agent-fallback")
     assert len(contexts) == 1
     assert trace["correction_attempts"] == 1
-    assert trace["corrective_queries"][0] != "Empagliflozin diabetes kidney outcomes"
+    assert trace["corrective_queries"][0]["query"] != "Empagliflozin diabetes kidney outcomes"
     assert trace["stop_reason"] == "correction_budget_exhausted"
     assert response.answer_status == AnswerStatus.LIMITED
 
@@ -541,7 +543,7 @@ def test_normalized_duplicate_agent_query_is_rejected_and_summaries_stay_bounded
     trace = service.get_trace("duplicate-agent-query")
 
     assert len(trace["corrective_queries"]) == 1
-    assert " ".join(trace["corrective_queries"][0].casefold().split()) != " ".join(question.casefold().split())
+    assert " ".join(trace["corrective_queries"][0]["query"].casefold().split()) != " ".join(question.casefold().split())
     assert response.answer_status == AnswerStatus.LIMITED
     assert {name for name, _ in events} >= {
         "agent_decision", "query_enhanced", "route_arbitrated", "retrieval_attempt",
@@ -661,6 +663,122 @@ def test_corrective_query_stops_instead_of_adding_arbitrary_numbers():
         f"{plan.original_query} {' '.join(plan.mesh_terms[:3])}",
     ]
     assert service._corrective_query(plan, grade, used) is None
+
+
+def test_corrective_query_targets_ready_subquestion_before_generic_broadening():
+    plan = make_plan(
+        original_query="Compare empagliflozin with placebo for kidney outcomes",
+        canonical_query="empagliflozin versus placebo kidney outcomes",
+        route="COMPLEX",
+        intent="comparison",
+        pico=PICOModel(
+            intervention="empagliflozin", comparator="placebo", outcome="kidney outcomes"
+        ),
+    )
+    research_plan = ResearchPlanner().build(plan, max_subqueries=3)
+    coverage = {
+        "sq-1": SubquestionCoverage(subquestion_id="sq-1", status=CoverageStatus.COVERED),
+        "sq-2": SubquestionCoverage(
+            subquestion_id="sq-2", status=CoverageStatus.UNCOVERED,
+            missing_concepts=["placebo"],
+        ),
+        "sq-3": SubquestionCoverage(subquestion_id="sq-3", status=CoverageStatus.BLOCKED),
+    }
+    service = make_test_service()
+
+    target = service._corrective_query(
+        plan, EvidenceGrade("PARTIAL", ["comparative safety"], {}, "partial"),
+        [plan.original_query], research_plan, coverage,
+    )
+
+    assert target is not None
+    subquestion_id, query = target
+    assert subquestion_id == "sq-2"
+    assert research_plan.subquestions[1].question in query
+    assert "comparative safety" not in query
+
+
+def test_complex_research_trace_exposes_dependency_ordered_coverage_and_targets():
+    class ComplexQueryAnalysis:
+        def build_query_plan(self, raw_query, user_filters=None, generate_embeddings=False, **kwargs):
+            rewrite = kwargs.get("agent_rewrite")
+            return make_plan(
+                original_query=raw_query,
+                clean_query=raw_query,
+                canonical_query=rewrite or "empagliflozin versus placebo kidney outcomes",
+                route="COMPLEX",
+                intent="comparison",
+                pico=PICOModel(
+                    intervention="empagliflozin", comparator="placebo", outcome="kidney outcomes"
+                ),
+            ), None
+
+    class TargetedHybrid(FakeHybrid):
+        def search(self, plan, top_k):
+            query = plan.canonical_query.casefold()
+            if "direct evidence compares" in query:
+                return [make_candidate(
+                    pmid="1003",
+                    abstract="Direct evidence compares empagliflozin with placebo for kidney outcomes.",
+                )]
+            if "what evidence reports kidney outcomes for placebo" in query:
+                return [make_candidate(
+                    pmid="1002", abstract="Placebo kidney outcomes were reported in the comparator arm."
+                )]
+            return [make_candidate(
+                pmid="1001", abstract="Empagliflozin improved kidney outcomes in the intervention arm."
+            )]
+
+    service = make_test_service(judge=AlwaysSufficientJudge(), hybrid=TargetedHybrid())
+    service._query_analysis_service = ComplexQueryAnalysis()
+
+    service.research(
+        "Compare empagliflozin with placebo for kidney outcomes",
+        max_loops=2,
+        request_id="coverage-order",
+    )
+    trace = service.get_trace("coverage-order")
+
+    assert [item["subquestion_id"] for item in trace["retrieval_iterations"]] == [
+        "sq-1", "sq-2", "sq-3"
+    ]
+    assert [item["subquestion_id"] for item in trace["corrective_queries"]] == [
+        "sq-2", "sq-3"
+    ]
+    assert trace["research_plan"]["subquestions"][2]["dependencies"] == ["sq-1", "sq-2"]
+    assert trace["coverage_history"][0]["coverage"][2]["status"] == "BLOCKED"
+    assert all(
+        item["status"] == "COVERED" for item in trace["coverage_history"][-1]["coverage"]
+    )
+    assert trace["stop_reason"] == "evidence_sufficient"
+
+
+def test_complex_correction_does_not_repeat_the_initial_targeted_subquestion():
+    class ComplexQueryAnalysis:
+        def build_query_plan(self, raw_query, user_filters=None, generate_embeddings=False, **kwargs):
+            return make_plan(
+                original_query=raw_query,
+                clean_query=raw_query,
+                canonical_query=kwargs.get("agent_rewrite") or raw_query,
+                route="COMPLEX",
+                intent="comparison",
+                pico=PICOModel(
+                    intervention="empagliflozin", comparator="placebo", outcome="kidney outcomes"
+                ),
+            ), None
+
+    service = make_test_service(judge=AlwaysPartialJudge(), hybrid=EmptyHybrid())
+    service._query_analysis_service = ComplexQueryAnalysis()
+    service.research(
+        "Compare empagliflozin with placebo for kidney outcomes",
+        max_loops=1,
+        request_id="no-repeat-target",
+    )
+    trace = service.get_trace("no-repeat-target")
+
+    assert trace["retrieval_iterations"][0]["subquestion_id"] == "sq-1"
+    assert trace["corrective_queries"][0]["subquestion_id"] == "sq-2"
+    assert trace["corrective_queries"][0]["query"] != trace["retrieval_iterations"][0]["query"]
 
 
 class EmptyHybrid(FakeHybrid):

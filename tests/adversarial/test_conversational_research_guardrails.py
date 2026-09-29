@@ -303,7 +303,10 @@ def test_repeated_corrective_proposal_stops_within_budget_without_repeating_quer
         request_id="repeated-correction-adversarial",
     )
     trace = service.get_trace("repeated-correction-adversarial")
-    normalized = [" ".join(query.casefold().split()) for query in [initial, *trace["corrective_queries"]]]
+    normalized = [" ".join(initial.casefold().split())] + [
+        " ".join(item["query"].casefold().split())
+        for item in trace["corrective_queries"]
+    ]
 
     assert result.answer_status.value == "LIMITED"
     assert trace["correction_attempts"] <= 2

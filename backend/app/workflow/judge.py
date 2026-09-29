@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing_extensions import Literal
 
 from backend.app.models.request_response import RetrievalCandidate
+from backend.app.models.research_plan import (
+    CoverageStatus,
+    ResearchPlan,
+    SubquestionCoverage,
+)
 from backend.app.query.models import QueryPlan
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
 from backend.app.core.nim_client import create_nim_client
@@ -30,9 +35,14 @@ class EvidenceGrade:
     missing_subquestions: List[str] = field(default_factory=list)
     conflicts: List[str] = field(default_factory=list)
     judge_mode: str = "deterministic"
+    subquestion_coverage: List[SubquestionCoverage] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        result["subquestion_coverage"] = [
+            item.model_dump(mode="json") for item in self.subquestion_coverage
+        ]
+        return result
 
 
 class _JudgeResponse(BaseModel):
@@ -119,6 +129,92 @@ class EvidenceSufficiencyJudge:
             },
             rationale="Grade derived from retrieved study count, reranker relevance, concept coverage, and filter compliance.",
         )
+
+    @classmethod
+    def grade_subquestions(
+        cls,
+        research_plan: ResearchPlan,
+        candidates: Sequence[RetrievalCandidate],
+        *,
+        conservative_missing: Sequence[str] = (),
+    ) -> List[SubquestionCoverage]:
+        """Compute bounded coverage from source text, preserving DAG dependencies."""
+        coverage: dict[str, SubquestionCoverage] = {}
+        candidate_text = [
+            (
+                item,
+                " ".join([item.title, item.abstract, " ".join(item.mesh_terms)]),
+            )
+            for item in candidates
+        ]
+        downgrade_terms = [str(item).strip().casefold() for item in conservative_missing if str(item).strip()]
+
+        for node in research_plan.subquestions:
+            blocked_by = [
+                dependency
+                for dependency in node.dependencies
+                if coverage.get(dependency) is None
+                or coverage[dependency].status is not CoverageStatus.COVERED
+            ]
+            if blocked_by:
+                coverage[node.id] = SubquestionCoverage(
+                    subquestion_id=node.id,
+                    status=CoverageStatus.BLOCKED,
+                    missing_concepts=node.required_concepts,
+                    reason=f"Blocked until dependencies are covered: {', '.join(blocked_by)}",
+                )
+                continue
+
+            concepts = node.required_concepts or [node.question]
+            matched: set[str] = set()
+            supporting_pmids: list[str] = []
+            fully_supporting_pmids: list[str] = []
+            for candidate, text in candidate_text:
+                candidate_matches = [concept for concept in concepts if cls._appears(concept, text)]
+                if candidate_matches:
+                    supporting_pmids.append(candidate.pmid)
+                    matched.update(candidate_matches)
+                requires_direct_comparison = "direct comparison" in node.purpose.casefold()
+                has_direct_comparison = bool(
+                    re.search(r"\b(?:compare|compared|compares|versus|vs\.?)\b", text, re.IGNORECASE)
+                )
+                if len(candidate_matches) == len(concepts) and (
+                    not requires_direct_comparison or has_direct_comparison
+                ):
+                    fully_supporting_pmids.append(candidate.pmid)
+
+            missing = [concept for concept in concepts if concept not in matched]
+            if fully_supporting_pmids and not missing:
+                status = CoverageStatus.COVERED
+                reason = "All required concepts occur together in retrieved evidence."
+                pmids = fully_supporting_pmids
+            elif supporting_pmids:
+                status = CoverageStatus.PARTIAL
+                reason = "Retrieved evidence covers only part of the subquestion."
+                pmids = supporting_pmids
+            else:
+                status = CoverageStatus.UNCOVERED
+                reason = "No retrieved study covers the required subquestion concepts."
+                pmids = []
+
+            node_text = f"{node.id} {node.question}".casefold()
+            if status is CoverageStatus.COVERED and any(
+                term == node.id.casefold()
+                or term == node.question.casefold()
+                or (len(term) >= 12 and term in node_text)
+                for term in downgrade_terms
+            ):
+                status = CoverageStatus.PARTIAL
+                reason = "Coverage was conservatively downgraded by the evidence judge."
+
+            coverage[node.id] = SubquestionCoverage(
+                subquestion_id=node.id,
+                status=status,
+                supporting_pmids=pmids,
+                missing_concepts=missing,
+                reason=reason,
+            )
+        return [coverage[node.id] for node in research_plan.subquestions]
 
     def _get_client(self) -> Any:
         if self.llm_judge is not None:
@@ -218,8 +314,22 @@ class EvidenceSufficiencyJudge:
             logger.warning("Optional NIM evidence judge failed; retaining deterministic grade: %s", type(exc).__name__)
             return None
 
-    def judge(self, plan: QueryPlan, candidates: Sequence[RetrievalCandidate]) -> EvidenceGrade:
+    def judge(
+        self,
+        plan: QueryPlan,
+        candidates: Sequence[RetrievalCandidate],
+        research_plan: Optional[ResearchPlan] = None,
+    ) -> EvidenceGrade:
         deterministic = self._deterministic_grade(plan, candidates)
+        if research_plan is not None:
+            deterministic = EvidenceGrade(
+                **{
+                    **deterministic.to_dict(),
+                    "subquestion_coverage": self.grade_subquestions(
+                        research_plan, candidates
+                    ),
+                }
+            )
         if not candidates:
             return deterministic
         llm_result = self._llm_grade(plan, candidates)
@@ -230,6 +340,13 @@ class EvidenceSufficiencyJudge:
             key=lambda grade: self.GRADES[grade],
         )
         missing = list(dict.fromkeys(deterministic.missing_concepts + llm_result["missing_concepts"]))
+        coverage = deterministic.subquestion_coverage
+        if research_plan is not None:
+            coverage = self.grade_subquestions(
+                research_plan,
+                candidates,
+                conservative_missing=llm_result["missing_subquestions"],
+            )
         return EvidenceGrade(
             grade=final_grade,
             missing_concepts=missing,
@@ -240,4 +357,5 @@ class EvidenceSufficiencyJudge:
             missing_subquestions=llm_result["missing_subquestions"],
             conflicts=llm_result["conflicts"],
             judge_mode="llm_assisted",
+            subquestion_coverage=coverage,
         )

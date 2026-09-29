@@ -10,15 +10,21 @@ import threading
 import uuid
 from time import perf_counter
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from backend.app.evidence.extraction import EvidenceAnalyzer, EvidenceExtractor
 from backend.app.models.request_response import AnswerStatus, EvidenceRecord, ResearchResponse, RetrievalCandidate
+from backend.app.models.research_plan import (
+    CoverageStatus,
+    ResearchPlan,
+    SubquestionCoverage,
+)
 from backend.app.conversation.models import CorrectiveResearchProposal, EvidenceGapContext
 from backend.app.query.models import QueryPlan
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
+from backend.app.workflow.planning import ResearchPlanner
 from backend.app.workflow.synthesis import EvidenceSynthesizer, _claims
 
 logger = logging.getLogger(__name__)
@@ -52,7 +58,10 @@ class _WorkflowState:
     initial_plan: Optional[QueryPlan] = None
     candidates_by_pmid: Dict[str, RetrievalCandidate] = field(default_factory=dict)
     grade: Optional[EvidenceGrade] = None
-    corrective_queries: List[str] = field(default_factory=list)
+    research_plan: Optional[ResearchPlan] = None
+    coverage: Dict[str, SubquestionCoverage] = field(default_factory=dict)
+    coverage_history: List[Dict[str, Any]] = field(default_factory=list)
+    corrective_queries: List[Dict[str, Any]] = field(default_factory=list)
     retrieval_iterations: List[Dict[str, Any]] = field(default_factory=list)
     stages: List[Dict[str, Any]] = field(default_factory=list)
     stop_reason: Optional[str] = None
@@ -74,6 +83,8 @@ class _WorkflowState:
     trace_payload: Dict[str, Any] = field(default_factory=dict)
     pending_details: Dict[str, Any] = field(default_factory=dict)
     next_query: Optional[str] = None
+    current_subquestion_id: Optional[str] = None
+    next_subquestion_id: Optional[str] = None
     timings_ms: List[Dict[str, Any]] = field(default_factory=list)
     event_sink: Optional[Callable[[str, Dict[str, Any]], None]] = field(default=None, repr=False)
 
@@ -440,7 +451,64 @@ class ResearchService:
             selected = ranked[:minimum]
         return selected[:limit]
 
-    def _corrective_query(self, plan: QueryPlan, grade: EvidenceGrade, used: Sequence[str]) -> Optional[str]:
+    @staticmethod
+    def _subquestion_query(plan: QueryPlan, question: str) -> str:
+        return re.sub(r"\s+", " ", f"{plan.original_query} {question}").strip()
+
+    @staticmethod
+    def _coverage_map(items: Sequence[SubquestionCoverage]) -> Dict[str, SubquestionCoverage]:
+        return {item.subquestion_id: item for item in items}
+
+    @staticmethod
+    def _coverage_complete(coverage: Dict[str, SubquestionCoverage]) -> bool:
+        return bool(coverage) and all(
+            item.status is CoverageStatus.COVERED for item in coverage.values()
+        )
+
+    @staticmethod
+    def _merge_research_coverage(
+        grade: EvidenceGrade,
+        research_plan: ResearchPlan,
+        candidates: Sequence[RetrievalCandidate],
+    ) -> EvidenceGrade:
+        coverage = EvidenceSufficiencyJudge.grade_subquestions(
+            research_plan,
+            candidates,
+            conservative_missing=grade.missing_subquestions,
+        )
+        incomplete = [
+            node.question
+            for node, item in zip(research_plan.subquestions, coverage)
+            if item.status is not CoverageStatus.COVERED
+        ]
+        final_grade = grade.grade
+        rationale = grade.rationale
+        if incomplete and final_grade == "SUFFICIENT":
+            final_grade = "PARTIAL"
+            rationale = "Overall evidence was downgraded because planned subquestions remain uncovered."
+        return replace(
+            grade,
+            grade=final_grade,
+            rationale=rationale,
+            missing_subquestions=list(dict.fromkeys(grade.missing_subquestions + incomplete))[:20],
+            subquestion_coverage=coverage,
+        )
+
+    def _corrective_query(
+        self,
+        plan: QueryPlan,
+        grade: EvidenceGrade,
+        used: Sequence[str],
+        research_plan: Optional[ResearchPlan] = None,
+        coverage: Optional[Dict[str, SubquestionCoverage]] = None,
+    ) -> Optional[Any]:
+        used_normalized = {re.sub(r"\s+", " ", query).strip().casefold() for query in used}
+        if research_plan is not None:
+            for node in research_plan.ready_subquestions(coverage or {}):
+                correction = self._subquestion_query(plan, node.question)
+                if correction.casefold() not in used_normalized:
+                    return node.id, correction
+
         missing = [item for item in grade.missing_concepts if item.casefold() not in plan.original_query.casefold()]
         options = []
         if missing:
@@ -452,11 +520,10 @@ class ResearchService:
                 f"{plan.original_query} {' '.join((plan.mesh_terms or [])[:3])}",
             ]
         )
-        used_normalized = {re.sub(r"\s+", " ", query).strip().casefold() for query in used}
         for option in options:
             correction = re.sub(r"\s+", " ", option).strip()
             if correction and correction.casefold() not in used_normalized:
-                return correction
+                return (None, correction) if research_plan is not None else correction
         return None
 
     def research(
@@ -506,6 +573,28 @@ class ResearchService:
             workflow.route_floor = max(
                 (workflow.route_floor, workflow.initial_plan.route), key=route_ranks.__getitem__
             )
+            workflow.research_plan = ResearchPlanner().build(
+                workflow.initial_plan,
+                max_subqueries=min(
+                    8,
+                    max(1, int(getattr(self.settings, "MAX_SUBQUERIES", 4))),
+                ),
+            )
+            initial_coverage = EvidenceSufficiencyJudge.grade_subquestions(
+                workflow.research_plan, []
+            )
+            workflow.coverage = self._coverage_map(initial_coverage)
+            ready = workflow.research_plan.ready_subquestions(workflow.coverage)
+            if ready:
+                workflow.current_subquestion_id = ready[0].id
+                if len(workflow.research_plan.subquestions) > 1:
+                    workflow.current_query = self._subquestion_query(
+                        workflow.initial_plan, ready[0].question
+                    )
+                    if normalize_query(workflow.current_query) not in {
+                        normalize_query(item) for item in used_queries
+                    }:
+                        used_queries.append(workflow.current_query)
             if workflow.event_sink:
                 workflow.event_sink("query_enhanced", {"iteration": 0, "rewrite_applied": bool(agent_rewrite)})
                 workflow.event_sink("route_arbitrated", {"iteration": 0, "route": workflow.current_route, "route_floor": workflow.route_floor})
@@ -523,11 +612,14 @@ class ResearchService:
             workflow = data["workflow"]
             current_query = workflow.current_query or query
             self._transition(workflow, "retrieve", iteration=workflow.iteration, query=current_query)
-            plan = workflow.initial_plan if workflow.iteration == 0 else self._build_plan(
+            needs_targeted_plan = workflow.iteration > 0 or normalize_query(current_query) != normalize_query(
+                agent_rewrite or query
+            )
+            plan = self._build_plan(
                 query, filters, route_floor=workflow.route_floor,
                 agent_rewrite=current_query,
                 agent_complexity_hint=workflow.current_complexity_hint,
-            )
+            ) if needs_targeted_plan else workflow.initial_plan
             workflow.route_floor = max(
                 (workflow.route_floor, plan.route), key=route_ranks.__getitem__
             )
@@ -566,7 +658,31 @@ class ResearchService:
             if workflow.technical_failure:
                 workflow.grade = EvidenceGrade("INSUFFICIENT", [], {}, "Retrieval failed before evidence could be judged.")
             else:
-                workflow.grade = self._get_judge().judge(workflow.initial_plan, judge_candidates)
+                judge = self._get_judge().judge
+                judge_parameters = inspect.signature(judge).parameters
+                if "research_plan" in judge_parameters:
+                    workflow.grade = judge(
+                        workflow.initial_plan,
+                        judge_candidates,
+                        research_plan=workflow.research_plan,
+                    )
+                else:
+                    workflow.grade = judge(workflow.initial_plan, judge_candidates)
+                workflow.grade = self._merge_research_coverage(
+                    workflow.grade,
+                    workflow.research_plan,
+                    workflow.ranked_candidates,
+                )
+            workflow.coverage = self._coverage_map(workflow.grade.subquestion_coverage)
+            workflow.coverage_history.append(
+                {
+                    "iteration": workflow.iteration,
+                    "coverage": [
+                        item.model_dump(mode="json")
+                        for item in workflow.grade.subquestion_coverage
+                    ],
+                }
+            )
             if workflow.event_sink:
                 workflow.event_sink("evidence_judged", {
                     "iteration": workflow.iteration, "grade": workflow.grade.grade,
@@ -578,6 +694,7 @@ class ResearchService:
                 {
                     "iteration": workflow.iteration,
                     "query": workflow.current_query,
+                    "subquestion_id": workflow.current_subquestion_id,
                     "query_plan": plan.model_dump(mode="json"),
                     "candidate_pmids": [candidate.pmid for candidate in workflow.pending_candidates],
                     "accumulated_pmids": [candidate.pmid for candidate in workflow.ranked_candidates],
@@ -588,9 +705,10 @@ class ResearchService:
                 }
             )
             workflow.next_query = None
+            workflow.next_subquestion_id = None
             if workflow.technical_failure:
                 workflow.stop_reason = "retrieval_failed"
-            elif workflow.grade.grade == "SUFFICIENT":
+            elif workflow.grade.grade == "SUFFICIENT" and self._coverage_complete(workflow.coverage):
                 workflow.stop_reason = "evidence_sufficient"
             elif workflow.grade.conflicts:
                 workflow.stop_reason = "unresolved_conflict"
@@ -629,10 +747,18 @@ class ResearchService:
                 normalized_used = {normalize_query(item) for item in used_queries}
                 if proposal_query and normalize_query(proposal_query) not in normalized_used:
                     workflow.next_query = proposal_query
+                    ready = workflow.research_plan.ready_subquestions(workflow.coverage)
+                    workflow.next_subquestion_id = ready[0].id if ready else None
                 else:
-                    workflow.next_query = self._corrective_query(
-                        workflow.initial_plan, workflow.grade, used_queries
+                    correction = self._corrective_query(
+                        workflow.initial_plan,
+                        workflow.grade,
+                        used_queries,
+                        workflow.research_plan,
+                        workflow.coverage,
                     )
+                    if correction is not None:
+                        workflow.next_subquestion_id, workflow.next_query = correction
                     workflow.current_complexity_hint = None
                 if workflow.next_query is None:
                     workflow.stop_reason = workflow.stop_reason or "correction_stalled"
@@ -647,7 +773,13 @@ class ResearchService:
         def correct_node(data: _GraphInput) -> Dict[str, _WorkflowState]:
             workflow = data["workflow"]
             workflow.current_query = workflow.next_query
-            workflow.corrective_queries.append(workflow.current_query)
+            workflow.current_subquestion_id = workflow.next_subquestion_id
+            workflow.corrective_queries.append(
+                {
+                    "subquestion_id": workflow.current_subquestion_id,
+                    "query": workflow.current_query,
+                }
+            )
             used_queries.append(workflow.current_query)
             workflow.loop_count += 1
             workflow.iteration += 1
@@ -829,6 +961,8 @@ class ResearchService:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "original_query": query,
                 "query_plan": workflow.initial_plan.model_dump(mode="json"),
+                "research_plan": workflow.research_plan.model_dump(mode="json"),
+                "coverage_history": workflow.coverage_history,
                 "route": workflow.initial_plan.route,
                 "stages": workflow.stages,
                 "retrieval_iterations": workflow.retrieval_iterations,

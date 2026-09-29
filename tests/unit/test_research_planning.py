@@ -7,7 +7,9 @@ from backend.app.models.research_plan import (
     ResearchSubquestion,
     SubquestionCoverage,
 )
+from backend.app.models.request_response import RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
+from backend.app.workflow.judge import EvidenceSufficiencyJudge
 from backend.app.workflow.planning import ResearchPlanner
 
 
@@ -167,6 +169,40 @@ def test_ready_subquestions_require_covered_dependencies_and_stable_order():
         update={"status": CoverageStatus.COVERED, "supporting_pmids": ["2"]}
     )
     assert [node.id for node in plan.ready_subquestions(coverage)] == ["sq-3"]
+
+
+def test_judge_records_pmid_backed_coverage_and_blocks_dependent_nodes():
+    query_plan = make_query_plan(
+        original_query="Compare empagliflozin with placebo for kidney outcomes",
+        canonical_query="empagliflozin versus placebo kidney outcomes",
+        route="COMPLEX",
+        intent="comparison",
+        pico=PICOModel(
+            intervention="empagliflozin",
+            comparator="placebo",
+            outcome="kidney outcomes",
+        ),
+    )
+    research_plan = ResearchPlanner().build(query_plan, max_subqueries=3)
+    candidate = RetrievalCandidate(
+        pmid="1001",
+        title="Empagliflozin kidney outcomes",
+        abstract="Empagliflozin improved kidney outcomes in adults with diabetes.",
+        rrf_score=0.1,
+        reranker_score=0.9,
+    )
+
+    grade = EvidenceSufficiencyJudge().judge(
+        query_plan, [candidate], research_plan=research_plan
+    )
+    coverage = {item.subquestion_id: item for item in grade.subquestion_coverage}
+
+    assert coverage["sq-1"].status is CoverageStatus.COVERED
+    assert coverage["sq-1"].supporting_pmids == ["1001"]
+    assert coverage["sq-2"].status is CoverageStatus.PARTIAL
+    assert "placebo" in coverage["sq-2"].missing_concepts
+    assert coverage["sq-3"].status is CoverageStatus.BLOCKED
+    assert "sq-2" in coverage["sq-3"].reason
 
 
 def test_model_contracts_forbid_extra_fields():
