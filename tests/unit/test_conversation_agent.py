@@ -263,7 +263,16 @@ def test_provider_failure_clarifies_deictic_message_instead_of_guessing():
     assert "that" in result.message.casefold()
 
 
-@pytest.mark.parametrize("fragment", ["Why?", "What are the side effects?"])
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "Why?",
+        "What are the side effects?",
+        "What are the worst side effects?",
+        "What are rare side effects?",
+        "What are long-term risks?",
+    ],
+)
 def test_provider_failure_clarifies_short_or_topic_omitting_question_fragments(fragment):
     from backend.app.conversation.agent import ConversationAgent
 
@@ -276,10 +285,18 @@ def test_provider_failure_clarifies_short_or_topic_omitting_question_fragments(f
     assert result.message
 
 
-def test_provider_failure_keeps_biomedical_question_with_a_named_topic_actionable():
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What are the side effects of metformin?",
+        "What are the worst side effects of metformin?",
+        "What are the worst side effects for patients taking aspirin?",
+        "What benefits does metformin provide?",
+    ],
+)
+def test_provider_failure_keeps_biomedical_question_with_a_named_topic_actionable(question):
     from backend.app.conversation.agent import ConversationAgent
 
-    question = "What are the side effects of metformin?"
     result = ConversationAgent(
         settings(), completion_client=FakeCompletionClient(error=TimeoutError())
     ).plan_turn(question, ConversationHistoryWindow(current_message=question))

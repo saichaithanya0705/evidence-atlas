@@ -26,15 +26,31 @@ _CONTEXT_DEPENDENT = re.compile(
 )
 _SHORT_INTERROGATIVE = re.compile(r"^\s*(why|how|what|which|where|when|who)\b", re.I)
 _TOPIC_WORDS = {
-    "benefit", "benefits", "cause", "causes", "diagnosis", "dose", "dosage", "effect", "effects",
-    "effectiveness", "efficacy", "mechanism", "mechanisms", "outcome", "outcomes", "prevention",
-    "prognosis", "risk", "risks", "safety", "side", "symptom", "symptoms", "therapy", "treatment",
-    "treatments",
+    "adverse", "benefit", "benefits", "cause", "causes", "complication", "complications", "contraindication",
+    "contraindications", "diagnosis", "dose", "dosage", "dosing", "effect", "effects", "effective",
+    "effectiveness", "efficacy", "event", "events", "incidence", "interaction", "interactions", "mechanism",
+    "mechanisms", "monitoring", "outcome", "outcomes", "prevalence", "prevention", "prognosis", "risk",
+    "risks", "safety", "side", "symptom", "symptoms", "therapy", "treatment", "treatments", "toxicity",
+    "toxicities",
 }
 _QUESTION_FILLER_WORDS = {
-    "a", "all", "an", "any", "are", "common", "expected", "general", "generally", "is", "major",
-    "of", "overall", "possible", "potential", "reported", "serious", "the", "what", "which",
+    "a", "all", "an", "and", "any", "are", "common", "did", "do", "does", "expected", "general",
+    "generally", "have", "has", "in", "is", "major", "of", "or", "overall", "possible", "potential",
+    "reported", "serious", "the", "what", "which",
 }
+_GENERIC_MODIFIERS = {
+    "acute", "adverse", "best", "chronic", "common", "expected", "general", "generally", "long", "mild",
+    "minor", "major", "possible", "potential", "rare", "reported", "serious", "severe", "short", "term",
+    "typical", "worst",
+}
+_ANCHOR_PREPOSITIONS = {"about", "after", "among", "between", "by", "for", "from", "in", "of", "on", "to", "with"}
+_ACTION_VERBS = {
+    "affect", "affects", "associate", "associated", "cause", "causes", "caused", "develop", "develops",
+    "include", "includes", "induce", "induces", "increase", "increases", "improve", "improves", "lead",
+    "leads", "prevent", "prevents", "produce", "produces", "provide", "provides", "reduce", "reduces", "report", "reports",
+    "result", "results", "show", "shows", "treat", "treats",
+}
+_COPULAS = {"am", "are", "is", "was", "were"}
 
 
 class ConversationAgent:
@@ -136,10 +152,35 @@ class ConversationAgent:
         if len(words) <= 2 and _SHORT_INTERROGATIVE.search(message):
             return False
         if _TOPIC_WORDS.intersection(words):
-            substantive_words = set(words) - _TOPIC_WORDS - _QUESTION_FILLER_WORDS
-            if not substantive_words:
-                return False
+            ignored = _TOPIC_WORDS | _QUESTION_FILLER_WORDS | _GENERIC_MODIFIERS
+            if not ConversationAgent._has_explicit_topic_anchor(words, ignored):
+                substantive_words = set(words) - ignored
+                if not substantive_words or _SHORT_INTERROGATIVE.search(message) or "?" in message:
+                    return False
         return True
+
+    @staticmethod
+    def _has_explicit_topic_anchor(words: list[str], ignored: set[str]) -> bool:
+        for index, word in enumerate(words):
+            if word in _ANCHOR_PREPOSITIONS:
+                candidate = next((item for item in words[index + 1 :] if item not in ignored), None)
+                if candidate is not None:
+                    return True
+
+        for index, word in enumerate(words):
+            if word in _ACTION_VERBS:
+                if any(item not in ignored for item in words[:index]) or any(
+                    item not in ignored for item in words[index + 1 :]
+                ):
+                    return True
+            if word in _COPULAS:
+                topic_before = any(item in _TOPIC_WORDS for item in words[:index])
+                topic_after = any(item in _TOPIC_WORDS for item in words[index + 1 :])
+                subject_before = any(item not in ignored for item in words[:index])
+                subject_after = any(item not in ignored for item in words[index + 1 :])
+                if (topic_before and subject_after) or (topic_after and subject_before):
+                    return True
+        return False
 
     @staticmethod
     def _fallback(message: str) -> ConversationAgentDecision:
