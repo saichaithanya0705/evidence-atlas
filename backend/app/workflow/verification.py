@@ -147,7 +147,7 @@ class SemanticClaimVerifier:
                     not verdict.supporting_pmids
                     or any(pmid not in expected_pmids for pmid in verdict.supporting_pmids)
                 ):
-                    verdict = verdict.model_copy(update={"supported": False})
+                    verdict = verdict.model_copy(update={"supported": False, "supporting_pmids": []})
                 result_by_index[verdict.claim_index] = verdict
 
         results = []

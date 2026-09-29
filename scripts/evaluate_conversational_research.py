@@ -65,7 +65,7 @@ def evaluate_report(report: dict[str, Any]) -> dict[str, Any]:
             "unsupported_claim_rate": unsupported_count / len(released_claims) if released_claims else 0.0,
             "unsupported_released_claim_count": unsupported_count,
             "citation_validity_rate": sum(citation_cases) / len(citation_cases) if citation_cases else 1.0,
-            "claim_attribution_rate": attributed_count / len(released_claims) if released_claims else 1.0,
+            "claim_attribution_rate": attributed_count / len(released_claims) if released_claims else None,
             "latency_ms": {
                 "sample_count": len(latencies),
                 "mean": mean(latencies) if latencies else 0.0,

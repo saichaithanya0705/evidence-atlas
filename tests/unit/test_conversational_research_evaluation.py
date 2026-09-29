@@ -65,6 +65,22 @@ def test_report_fails_closed_for_unattributed_and_unsupported_released_claims():
     assert result["deterministic"]["unsupported_released_claim_count"] == 1
 
 
+def test_abstention_only_report_has_no_claim_attribution_sample():
+    report = {
+        "fixtures": [{
+            "name": "abstention-only", "expected_route": "SIMPLE", "actual_route": "SIMPLE",
+            "answer_status": "INSUFFICIENT", "citations_valid": True,
+            "latency_ms": 20, "llm_call_count": 0, "claims": [],
+        }],
+    }
+
+    metrics = evaluate_report(report)["deterministic"]
+
+    assert metrics["unsupported_claim_rate"] == 0.0
+    assert metrics["unsupported_released_claim_count"] == 0
+    assert metrics["claim_attribution_rate"] is None
+
+
 def test_fixture_json_serializes_the_full_required_metric_contract():
     encoded = json.dumps(evaluate_report(fixture_report()))
     for metric in (
