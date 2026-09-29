@@ -73,13 +73,17 @@ class ConversationHistoryWindow(_StrictModel):
 
 
 class EvidenceGapContext(_StrictModel):
+    standalone_question: str = Field(max_length=4000)
+    deterministic_grade: Literal["SUFFICIENT", "PARTIAL", "INSUFFICIENT"]
     missing_concepts: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=20)
-    unresolved_conflict: bool = False
-    conflict_summary: str | None = Field(default=None, max_length=1000)
+    missing_subquestions: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=20)
+    conflicts: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=20)
+    prior_queries: list[Annotated[str, Field(max_length=4000)]] = Field(default_factory=list, max_length=20)
+    route_floor: Literal["SIMPLE", "MODERATE", "COMPLEX"]
 
-    @field_validator("missing_concepts")
+    @field_validator("missing_concepts", "missing_subquestions", "conflicts", "prior_queries")
     @classmethod
-    def trim_missing_concepts(cls, values: list[str]) -> list[str]:
+    def trim_context_lists(cls, values: list[str]) -> list[str]:
         return _trim_string_list(values)
 
 

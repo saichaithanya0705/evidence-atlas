@@ -110,7 +110,15 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
         answer_status="SUPPORTED", assistant_message="Answer", created_at=now,
     )
     detail = ConversationDetailResponse(conversation=summary, turns=[turn], next_cursor=None)
-    gap = EvidenceGapContext(missing_concepts=["safety"], unresolved_conflict=False)
+    gap = EvidenceGapContext(
+        standalone_question="What are the safety outcomes?",
+        deterministic_grade="PARTIAL",
+        missing_concepts=["safety"],
+        missing_subquestions=["Which serious adverse events were observed?"],
+        conflicts=["Trials report different rates."],
+        prior_queries=["metformin safety outcomes"],
+        route_floor="MODERATE",
+    )
     proposal = CorrectiveResearchProposal(standalone_query="Compare safety", complexity_hint="MODERATE")
     history = ConversationHistoryWindow(
         current_message="Follow up", older_context_summary="Earlier asked about treatment",
@@ -124,10 +132,58 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
     )
     assert created.conversation_id == summary.conversation_id
     assert detail.turns[0].sequence == 1
-    assert gap.unresolved_conflict is False
+    assert gap.standalone_question == "What are the safety outcomes?"
+    assert gap.deterministic_grade == "PARTIAL"
+    assert gap.route_floor == "MODERATE"
     assert proposal.complexity_hint == "MODERATE"
     assert history.recent_turns[0].content == "Question"
     assert response.model_dump(mode="json")["answer_status"] == "LIMITED"
+
+
+def test_evidence_gap_context_requires_complete_bounded_planner_inputs():
+    values = {
+        "standalone_question": "What are the safety outcomes?",
+        "deterministic_grade": "INSUFFICIENT",
+        "missing_concepts": ["adverse events"],
+        "missing_subquestions": ["Which serious adverse events were reported?"],
+        "conflicts": ["Two trials report different rates."],
+        "prior_queries": ["metformin adverse events"],
+        "route_floor": "MODERATE",
+    }
+
+    gap = EvidenceGapContext(**values)
+
+    assert gap.model_dump() == values
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"standalone_question": None},
+        {"standalone_question": "x" * 4001},
+        {"deterministic_grade": "UNKNOWN"},
+        {"route_floor": "UNKNOWN"},
+        {"missing_subquestions": ["x" * 501]},
+        {"missing_subquestions": [" "]},
+        {"conflicts": ["x" * 1001]},
+        {"prior_queries": ["x" * 4001]},
+        {"filters": {"year_min": 2020}},
+    ],
+)
+def test_evidence_gap_context_rejects_missing_invalid_oversized_and_extra_values(changes):
+    values = {
+        "standalone_question": "What are the safety outcomes?",
+        "deterministic_grade": "INSUFFICIENT",
+        "missing_concepts": ["adverse events"],
+        "missing_subquestions": ["Which serious adverse events were reported?"],
+        "conflicts": ["Two trials report different rates."],
+        "prior_queries": ["metformin adverse events"],
+        "route_floor": "MODERATE",
+    }
+    values.update(changes)
+
+    with pytest.raises(ValidationError):
+        EvidenceGapContext(**values)
 
 
 def test_conversation_settings_have_bounded_conservative_defaults():
