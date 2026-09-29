@@ -590,3 +590,27 @@ def test_query_enhancement_preserves_rewrite_raw_must_have_and_explicit_filters(
     assert enhanced.filters.year_min == 2021
     assert enhanced.filters.year_max == 2025
     assert enhanced.filters.study_type_filters == ["Randomized Controlled Trial"]
+
+
+def test_build_query_plan_uses_one_consistent_enhancement_snapshot():
+    class StatefulPICOExtractor:
+        def __init__(self):
+            self.calls = 0
+
+        def extract(self, *_args):
+            self.calls += 1
+            return PICOModel(
+                population="adults",
+                intervention="metformin",
+                outcome=f"Outcome {self.calls}",
+            )
+
+    extractor = StatefulPICOExtractor()
+    service = QueryAnalysisService(pico_extractor=extractor)
+
+    plan, _ = service.build_query_plan("metformin outcomes in adults")
+
+    assert extractor.calls == 1
+    assert plan.pico.outcome == "Outcome 1"
+    assert plan.concepts == plan.concept_weights.high_priority
+    assert "Outcome 1" in plan.concepts

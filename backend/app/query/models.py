@@ -126,10 +126,16 @@ class EnhancedQuery(BaseModel):
 
     raw_query: str
     agent_rewrite: Optional[str] = None
+    clean_query: str = ""
     canonical_query: str
+    acronyms_expanded: Dict[str, str] = Field(default_factory=dict)
+    mesh_terms: List[str] = Field(default_factory=list)
+    pico: PICOModel = Field(default_factory=PICOModel)
+    non_pico_concepts: Optional[NonPICOConcepts] = None
     concepts: List[str] = Field(default_factory=list)
     must_have_concepts: List[str] = Field(default_factory=list)
     optional_expansions: List[str] = Field(default_factory=list)
+    concept_weights: ConceptWeights = Field(default_factory=ConceptWeights)
     filters: QueryFilters = Field(default_factory=QueryFilters)
     intent: str = "evidence_summary"
     transformation_notes: List[str] = Field(default_factory=list)

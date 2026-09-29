@@ -198,7 +198,7 @@ class QueryAnalysisService:
         *,
         agent_rewrite: Optional[str] = None,
         explicit_filters: Any = None,
-    ) -> Dict[str, Any]:
+    ) -> EnhancedQuery:
         combined_query = raw_query
         notes = ["Preserved the verbatim user query."]
         if agent_rewrite and agent_rewrite.strip():
@@ -255,23 +255,21 @@ class QueryAnalysisService:
         enhanced = EnhancedQuery(
             raw_query=raw_query,
             agent_rewrite=agent_rewrite,
+            clean_query=clean_q,
             canonical_query=canonical_q,
+            acronyms_expanded=acronyms,
+            mesh_terms=mesh_terms,
+            pico=pico,
+            non_pico_concepts=non_pico,
             concepts=concept_weights.high_priority or raw_concepts or [clean_q],
             must_have_concepts=concept_weights.must_have,
             optional_expansions=concept_weights.optional,
+            concept_weights=concept_weights,
             filters=final_filters,
             intent=intent,
             transformation_notes=notes,
         )
-        return {
-            "enhanced": enhanced,
-            "clean_query": clean_q,
-            "acronyms": acronyms,
-            "mesh_terms": mesh_terms,
-            "pico": pico,
-            "non_pico": non_pico,
-            "concept_weights": concept_weights,
-        }
+        return enhanced
 
     def enhance_query(
         self,
@@ -285,7 +283,7 @@ class QueryAnalysisService:
             raw_query,
             agent_rewrite=agent_rewrite,
             explicit_filters=explicit_filters,
-        )["enhanced"]
+        )
 
     def build_query_plan(
         self,
@@ -310,26 +308,20 @@ class QueryAnalysisService:
             Tuple of (QueryPlan, Optional[DualQueryEmbeddings]).
         """
         filter_input = explicit_filters if explicit_filters is not None else user_filters
-        prepared = self._prepare_enhancement(
-            raw_query,
-            agent_rewrite=agent_rewrite,
-            explicit_filters=filter_input,
-        )
-        # Route only after the public enhancement boundary has produced its
-        # guarded result. Keep this call explicit so subclasses and callers can
-        # observe every query entering the router.
+        # This structured result is both the public enhancement output and the
+        # complete snapshot consumed by plan assembly and routing.
         enhanced = self.enhance_query(
             raw_query,
             agent_rewrite=agent_rewrite,
             explicit_filters=filter_input,
         )
         orig_q = raw_query
-        clean_q = prepared["clean_query"]
-        acronyms = prepared["acronyms"]
-        mesh_terms = prepared["mesh_terms"]
-        pico = prepared["pico"]
-        non_pico = prepared["non_pico"]
-        concept_weights = prepared["concept_weights"]
+        clean_q = enhanced.clean_query
+        acronyms = enhanced.acronyms_expanded
+        mesh_terms = enhanced.mesh_terms
+        pico = enhanced.pico
+        non_pico = enhanced.non_pico_concepts
+        concept_weights = enhanced.concept_weights
         high_priority_concepts = enhanced.concepts
         intent = enhanced.intent
         canonical_q = enhanced.canonical_query
