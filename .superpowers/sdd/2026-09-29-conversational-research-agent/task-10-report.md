@@ -42,3 +42,23 @@
 - Generic projection helpers now accept scalar values only. Controls, event fields, citation summaries, PMIDs, evidence spans, paper lists, and timings each use their expected types and bounds; event enums and correction reasons are validated. Nested dictionaries/lists are either field-specifically sanitized or omitted.
 - Legitimate normalized evidence gaps, citation booleans/PMIDs, and finite numeric stage timings continue to project in the passing tests. The workflow event compatibility test also remains green.
 - `git diff --check`: clean before commit.
+
+## Fix Round 2 — field-specific evidence scalar types
+
+- Fix commit: `e114a9b` (`fix: validate audit evidence scalar types`).
+
+### RED
+
+- Added valid and malformed evidence/paper records. The malformed records use a string year, boolean text fields, numeric journal, and numeric PMID; valid records verify integer years and string fields remain available.
+- Command: `.venv\Scripts\python.exe -m pytest tests/unit/test_query_audits.py::test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events -q`
+- Result: failed as expected because a string `year`, boolean `title`, and boolean `population` were returned in the admin projection.
+
+### GREEN
+
+- Command: `.venv\Scripts\python.exe -m pytest tests/unit/test_query_audits.py tests/unit/test_admin_boundary.py tests/unit/test_research_pipeline.py::test_failed_synthesis_has_accurate_durable_stage_events -q`
+- Result: `16 passed, 4 warnings in 6.18s`.
+
+### Self-review
+
+- Evidence and paper projections now define expected scalar types per field: PMID is digit-only text, year is an integer bounded to 0–3000, descriptive fields are bounded strings, and author/mesh/span collections are bounded string lists. Invalid fields are omitted while valid data remains.
+- The nested injection sanitizers from Fix Round 1 remain intact. `git diff --check` passed before commit.
