@@ -5,8 +5,23 @@ retrieval candidates, evidence records, and research workflows.
 Maintains exact compatibility with tests/e2e/e2e_contracts.py.
 """
 from typing import Any, Dict, List, Optional, Union
+from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing_extensions import Literal
+
+
+class AgentAction(str, Enum):
+    RESEARCH = "RESEARCH"
+    CLARIFY = "CLARIFY"
+    ANSWER_FROM_EVIDENCE = "ANSWER_FROM_EVIDENCE"
+    ABSTAIN = "ABSTAIN"
+
+
+class AnswerStatus(str, Enum):
+    SUPPORTED = "SUPPORTED"
+    LIMITED = "LIMITED"
+    INSUFFICIENT = "INSUFFICIENT"
+    FAILED = "FAILED"
 
 
 class PICOModel(BaseModel):
@@ -87,6 +102,7 @@ class ResearchResponse(BaseModel):
     """Complete end-to-end response for an agentic literature synthesis request."""
     model_config = ConfigDict(extra="ignore")
 
+    answer_status: AnswerStatus = Field(default=AnswerStatus.SUPPORTED)
     request_id: str = Field(..., description="Unique request identifier")
     query: str = Field(..., description="Original user query")
     canonical_query: str = Field(..., description="Normalized biomedical query formulation")

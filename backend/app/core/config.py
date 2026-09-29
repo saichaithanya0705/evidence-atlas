@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     LLM_SYNTHESIS_MAX_TOKENS: int = Field(default=300, ge=128, le=2048)
     LLM_TIMEOUT_SECONDS: float = Field(default=30.0)
 
+    # Conversational research bounds
+    conversation_history_turn_limit: int = Field(default=12, ge=1, le=50)
+    conversation_message_max_chars: int = Field(default=4000, ge=1, le=4000)
+    conversation_title_max_chars: int = Field(default=80, ge=1, le=80)
+    conversation_turn_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    agent_output_max_tokens: int = Field(default=800, ge=1, le=2000)
+
     # Storage & Knowledge Base Paths
     QDRANT_STORAGE_PATH: str = Field(default="./data/qdrant_storage")
     QDRANT_COLLECTION_NAME: str = Field(default="medical_abstracts")
