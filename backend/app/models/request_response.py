@@ -98,6 +98,17 @@ class EvidenceRecord(BaseModel):
     supporting_text_spans: List[str] = Field(default_factory=list, description="Exact quotes from abstract")
 
 
+class ClaimVerification(BaseModel):
+    """Conservative semantic support judgment for one proposed claim."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claim_index: int = Field(ge=0)
+    supported: bool
+    supporting_pmids: List[str]
+    rationale: str = Field(max_length=300)
+
+
 class ResearchResponse(BaseModel):
     """Complete end-to-end response for an agentic literature synthesis request."""
     model_config = ConfigDict(extra="ignore")
