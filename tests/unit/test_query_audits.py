@@ -116,3 +116,52 @@ def test_audit_run_links_conversation_and_turn_without_breaking_legacy_callers(t
     assert audits.detail("linked-run")["turn_id"] == "turn-1"
     assert audits.detail("legacy-run")["conversation_id"] is None
     assert audits.detail("legacy-run")["turn_id"] is None
+
+
+def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audit_client):
+    client, path = audit_client
+    headers = login(client, "administrator", "admin-password-123")
+    account = AccountStore(path).by_username("alice")
+    audits = AuditStore(path)
+    audits.start("linked-trace", account, "conversation_turn", "safe question", {}, {},
+                 conversation_id="conversation-1", turn_id="turn-1")
+    audits.event("linked-trace", "agent_decision", {
+        "action": "RESEARCH", "complexity_hint": "MODERATE",
+        "decision_summary": "must not be exposed", "prompt": "hidden prompt",
+    })
+    audits.event("linked-trace", "query_analysis", {
+        "route": "MODERATE", "rule_route": "SIMPLE", "agent_complexity_hint": "MODERATE",
+        "router_reasoning": "hidden reasoning", "canonical_query": "safe normalized question",
+    })
+    audits.event("linked-trace", "correct", {"status": "completed", "duration_ms": 12.5, "query": "private correction"})
+    audits.event("linked-trace", "claim_verified", {"claim_count": 2, "supported_count": 2, "raw_output": "secret"})
+    audits.event("linked-trace", "answer_released", {"status": "SUPPORTED", "gap_count": 1})
+    audits.finish("linked-trace", "completed", {
+        "answer_status": "SUPPORTED", "evidence_gaps": ["  missing   pediatric evidence  "],
+        "provider_output": "private provider text", "prompt": "hidden system prompt",
+    }, {"query_plan": {"pico": {"population": "sensitive"}, "router_reasoning": "hidden"}})
+    audits.start("legacy-audit", account, "research", "old question", {}, {})
+    audits.finish("legacy-audit", "completed", {"synthesis": "legacy result"})
+
+    listing = client.get("/admin/audits", headers=headers).json()
+    item = next(row for row in listing["items"] if row["id"] == "linked-trace")
+    assert (item["conversation_id"], item["turn_id"], item["agent_action"]) == ("conversation-1", "turn-1", "RESEARCH")
+    assert item["agent_complexity_hint"] == "MODERATE"
+    assert (item["rule_route"], item["final_route"], item["answer_status"]) == ("SIMPLE", "MODERATE", "SUPPORTED")
+    assert item["correction_count"] == 1
+
+    detail = client.get("/admin/audits/linked-trace", headers=headers).json()
+    assert detail["evidence_gaps"] == ["missing pediatric evidence"]
+    assert detail["stage_durations_ms"] == {"correct": 12.5}
+    assert [event["stage"] for event in detail["events"]] == [
+        "agent_decision", "query_analysis", "correct", "claim_verified", "answer_released",
+    ]
+    assert "pico" not in str(detail)
+    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary"):
+        assert unsafe not in str(detail)
+    legacy_trace = client.get("/trace/linked-trace", headers=headers).json()
+    assert "pico" not in str(legacy_trace)
+    assert "router_reasoning" not in str(legacy_trace)
+
+    legacy = audits.list_runs()["items"]
+    assert any(row["id"] != "linked-trace" and row["conversation_id"] is None for row in legacy)

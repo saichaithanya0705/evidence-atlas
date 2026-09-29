@@ -207,6 +207,10 @@ class ConversationService:
             history = self._history(conversation_id, account, turn, message)
             decision = self.agent.plan_turn(message, history)
             event_sink = lambda stage, payload: self.audit.event(run_id, stage, payload)
+            event_sink("agent_decision", {
+                "action": decision.action.value,
+                "complexity_hint": decision.complexity_hint,
+            })
             research_response = None
             final_route = None
             standalone_query = decision.standalone_query
@@ -252,6 +256,7 @@ class ConversationService:
                 consensus = _value(research_response, "consensus_level", "insufficient")
                 assistant_message = str(_value(research_response, "synthesis", assistant_message))[:4000]
             public_payload["request_id"] = run_id
+            public_payload["answer_status"] = status.value
 
             public_response = {
                 "conversation_id": conversation_id,

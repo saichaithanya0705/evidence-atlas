@@ -134,7 +134,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     {detailState.loading && <p role="status">Loading conversation…</p>}
     {detailState.error && <p className="conversation-error" role="alert">{detailState.error}</p>}
     {!detailState.loading && !detailState.error && <>
-      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} />}
+      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} isAdmin={isAdmin} navigate={navigate} />}
       {!conversationId && !showList && <p className="conversation-empty">Start with a research question. Your messages will be saved in this conversation.</p>}
       <ResearchComposer onSubmit={submit} submitting={submitting} isAdmin={isAdmin} />
       {submissionError && <p className="conversation-error" role="alert">{submissionError}</p>}

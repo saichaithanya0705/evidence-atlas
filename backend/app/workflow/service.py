@@ -859,7 +859,15 @@ class ResearchService:
         def timed_node(name: str, node: Any) -> Any:
             def completed_details(workflow: _WorkflowState) -> Dict[str, Any]:
                 if name == "query_analysis" and workflow.initial_plan:
-                    return {"query_plan": {"route": workflow.initial_plan.route, "canonical_query": workflow.initial_plan.canonical_query[:240]}, "route": workflow.current_route}
+                    return {
+                        "query_plan": {
+                            "route": workflow.initial_plan.route,
+                            "canonical_query": workflow.initial_plan.canonical_query[:240],
+                        },
+                        "route": workflow.current_route,
+                        "rule_route": workflow.initial_plan.rule_route,
+                        "agent_complexity_hint": workflow.initial_plan.agent_complexity_hint,
+                    }
                 if name == "retrieve":
                     return {"candidate_pmids": [item.pmid for item in workflow.pending_candidates[:20]], "candidate_count": len(workflow.pending_candidates)}
                 if name == "judge" and workflow.grade:

@@ -7,8 +7,143 @@ import math
 from .database import connect_db, utc_now
 
 
+_EVENT_FIELDS = {
+    "agent_decision": {"action", "complexity_hint", "accepted", "iteration", "route_floor"},
+    "query_enhanced": {"iteration", "rewrite_applied"},
+    "route_arbitrated": {"iteration", "route", "route_floor"},
+    "query_analysis": {"status", "duration_ms", "route", "rule_route", "agent_complexity_hint"},
+    "retrieval_attempt": {"iteration", "route"},
+    "retrieve": {"status", "duration_ms", "candidate_count", "iteration"},
+    "judge": {"status", "duration_ms", "grade", "missing_count", "conflict_count", "stop_reason", "iteration"},
+    "evidence_judged": {"iteration", "grade", "missing_count", "conflict_count"},
+    "correct": {"status", "duration_ms", "iteration"},
+    "correction_stopped": {"reason", "iteration"},
+    "claim_verified": {"claim_count", "supported_count"},
+    "semantic_verification": {"supported_count", "unsupported_count"},
+    "answer_released": {"status", "claim_count", "gap_count"},
+    "evidence": {"status", "duration_ms", "evidence_count", "iteration"},
+    "synthesize": {"status", "duration_ms"},
+    "validate": {"status", "duration_ms"},
+    "done": {"status", "duration_ms", "stop_reason"},
+}
+_CONTROL_FIELDS = {"year_min", "year_max", "study_types", "max_loops"}
+_RESPONSE_FIELDS = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps", "evidence_table", "retrieved_papers", "citations_valid", "citation_precision", "consensus_level", "route", "answer_status"}
+_EVIDENCE_FIELDS = {"pmid", "title", "year", "study_design", "population", "intervention", "comparator", "outcome", "key_findings", "limitations", "supporting_text_spans"}
+_PAPER_FIELDS = {"pmid", "title", "abstract", "journal", "year", "authors", "mesh_terms", "study_type"}
+_TRACE_FIELDS = {"valid", "citations_valid", "precision", "citation_precision", "cited_pmids", "invalid_pmids"}
+_TIMING_FIELDS = {"total", "total_ms", "duration_ms", "query_analysis", "retrieval", "judge", "evidence", "synthesis", "validation"}
+
+
 def _json(value):
     return json.dumps(value or {}, ensure_ascii=False, default=str, separators=(",", ":"))
+
+
+def _safe_gaps(values):
+    if not isinstance(values, list):
+        return []
+    return [" ".join(item.split())[:240] for item in values[:10] if isinstance(item, str) and item.strip()]
+
+
+def _safe_mapping(value, allowed):
+    if not isinstance(value, dict):
+        return {}
+    return {key: value[key] for key in allowed if key in value and isinstance(value[key], (str, int, float, bool, list, dict, type(None)))}
+
+
+def _safe_controls(value):
+    source = value if isinstance(value, dict) else {}
+    return {key: source[key] for key in _CONTROL_FIELDS if key in source}
+
+
+def _safe_response(value):
+    if not isinstance(value, dict):
+        return None
+    response = _safe_mapping(value, _RESPONSE_FIELDS)
+    response["evidence_gaps"] = _safe_gaps(value.get("evidence_gaps"))
+    response["evidence_table"] = [
+        _safe_mapping(item, _EVIDENCE_FIELDS) for item in value.get("evidence_table", [])[:20]
+        if isinstance(item, dict)
+    ] if isinstance(value.get("evidence_table"), list) else []
+    response["retrieved_papers"] = [
+        _safe_mapping(item, _PAPER_FIELDS) for item in value.get("retrieved_papers", [])[:20]
+        if isinstance(item, dict)
+    ] if isinstance(value.get("retrieved_papers"), list) else []
+    return response
+
+
+def _safe_trace(value):
+    if not isinstance(value, dict):
+        return None
+    result = {}
+    citation_audit = value.get("citation_audit")
+    if isinstance(citation_audit, dict):
+        result["citation_audit"] = _safe_mapping(citation_audit, _TRACE_FIELDS)
+    timings = value.get("timings_ms")
+    if isinstance(timings, dict):
+        result["timings_ms"] = {
+            key: item for key, item in timings.items()
+            if key in _TIMING_FIELDS and isinstance(item, (int, float)) and math.isfinite(item)
+        }
+    return result
+
+
+def _safe_event(event):
+    stage = event.get("stage")
+    allowed = _EVENT_FIELDS.get(stage)
+    if allowed is None:
+        return None
+    payload = _safe_mapping(event.get("payload"), allowed)
+    # semantic verdict objects can include rationale and claim text; expose only counts.
+    if stage == "semantic_verification":
+        verdicts = event.get("payload", {}).get("verdicts", [])
+        if isinstance(verdicts, list):
+            payload = {
+                "supported_count": sum(bool(item.get("supported")) for item in verdicts if isinstance(item, dict)),
+                "unsupported_count": sum(not bool(item.get("supported")) for item in verdicts if isinstance(item, dict)),
+            }
+    return {"stage": stage, "timestamp": event.get("timestamp"), "payload": payload}
+
+
+def _admin_projection(row, events, response, trace):
+    safe_events = [item for event in events if (item := _safe_event(event)) is not None]
+    response = _safe_response(response)
+    trace = _safe_trace(trace)
+    by_stage = {}
+    for event in safe_events:
+        payload = event["payload"]
+        by_stage[event["stage"]] = payload
+    analysis = by_stage.get("query_analysis", {})
+    agent_event = next((event["payload"] for event in safe_events if event["stage"] == "agent_decision" and "action" in event["payload"]), {})
+    route_events = [event["payload"] for event in safe_events if event["stage"] == "route_arbitrated"]
+    released = by_stage.get("answer_released", {})
+    correction_count = min(100, sum(event["stage"] == "correct" and event["payload"].get("status") == "completed" for event in safe_events))
+    durations = {
+        event["stage"]: event["payload"]["duration_ms"]
+        for event in safe_events if isinstance(event["payload"].get("duration_ms"), (int, float))
+    }
+    projected = {
+        key: row.get(key) for key in (
+            "id", "username", "role", "operation", "query", "status", "started_at",
+            "finished_at", "duration_ms", "conversation_id", "turn_id",
+        )
+    }
+    projected.update({
+        "error": "The operation failed." if row.get("status") in {"failed", "interrupted"} else None,
+        "requested_controls": _safe_controls(row.get("requested_controls")),
+        "applied_controls": _safe_controls(row.get("applied_controls")),
+        "agent_action": agent_event.get("action"),
+        "agent_complexity_hint": agent_event.get("complexity_hint") or analysis.get("agent_complexity_hint"),
+        "rule_route": analysis.get("rule_route"),
+        "final_route": (route_events[-1].get("route") if route_events else None) or analysis.get("route") or (response or {}).get("route"),
+        "answer_status": (response or {}).get("answer_status") or released.get("status"),
+        "correction_count": correction_count,
+        "evidence_gaps": _safe_gaps((response or {}).get("evidence_gaps")),
+        "stage_durations_ms": durations,
+        "response": response,
+        "trace": trace,
+        "events": safe_events,
+    })
+    return projected
 
 
 class AuditStore:
@@ -74,6 +209,12 @@ class AuditStore:
             result["events"] = [{"stage": e["stage"], "timestamp": e["timestamp"], "payload": json.loads(e["payload"])} for e in events]
             return result
 
+    def admin_detail(self, run_id):
+        raw = self.detail(run_id)
+        if raw is None:
+            return None
+        return _admin_projection(raw, raw["events"], raw.get("response"), raw.get("trace"))
+
     def list_runs(self, *, limit=50, offset=0, account=None, status=None, query=None, from_date=None, to_date=None):
         clauses, params = [], []
         if account:
@@ -95,8 +236,8 @@ class AuditStore:
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with connect_db(self.path) as db:
             total = db.execute("SELECT COUNT(*) FROM query_runs" + where, params).fetchone()[0]
-            rows = db.execute("SELECT id,username,role,operation,query,status,started_at,finished_at,duration_ms,error FROM query_runs" + where + " ORDER BY started_at DESC,id DESC LIMIT ? OFFSET ?", [*params, min(100, max(1, limit)), max(0, offset)]).fetchall()
-        return {"items": [dict(row) for row in rows], "total": total}
+            rows = db.execute("SELECT id FROM query_runs" + where + " ORDER BY started_at DESC,id DESC LIMIT ? OFFSET ?", [*params, min(100, max(1, limit)), max(0, offset)]).fetchall()
+        return {"items": [self.admin_detail(row["id"]) for row in rows], "total": total}
 
     def aggregate(self, from_date=None):
         with connect_db(self.path) as db:

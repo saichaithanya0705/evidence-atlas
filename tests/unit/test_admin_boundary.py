@@ -86,3 +86,19 @@ def test_reader_research_excludes_diagnostics(client, monkeypatch):
     assert body["evidence_gaps"] == ["Missing safety evidence"]
     assert body["evidence_table"][0]["supporting_text_spans"] == ["Exact abstract span"]
     assert "channel_scores" not in body["retrieved_papers"][0]
+
+
+def test_reader_cannot_read_linked_admin_trace_or_internal_metadata(client, monkeypatch, tmp_path):
+    from backend.app.storage.audits import AuditStore
+
+    path = tmp_path / "boundary.sqlite3"
+    account = AccountStore(path).by_username("reader")
+    audits = AuditStore(path)
+    audits.start("private-trace", account, "conversation_turn", "question", {}, {},
+                 conversation_id="conversation-private", turn_id="turn-private")
+    audits.event("private-trace", "agent_decision", {"action": "RESEARCH"})
+    audits.finish("private-trace", "completed", {"answer_status": "SUPPORTED"})
+    headers = sign_in(client, "reader", "reader-password-123")
+
+    assert client.get("/admin/audits", headers=headers).status_code == 403
+    assert client.get("/admin/audits/private-trace", headers=headers).status_code == 403

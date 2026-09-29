@@ -324,7 +324,7 @@ async def trace(
     request_id: str,
     account: Dict[str, Any] = Depends(require_admin),
 ) -> Dict[str, Any]:
-    detail = AuditStore(get_settings().APP_DATABASE_PATH).detail(request_id)
+    detail = AuditStore(get_settings().APP_DATABASE_PATH).admin_detail(request_id)
     if detail is not None:
         return detail["trace"] or {"request_id": request_id, "events": detail["events"], "status": detail["status"]}
     return {

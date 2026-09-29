@@ -58,8 +58,8 @@ async function scenario(role, width) {
       const id = url.pathname.split('/').pop(); const record = conversations.get(id);
       data = { conversation: record.conversation, turns: record.turns, next_cursor: null };
     }
-    else if (url.pathname === '/api/admin/audits') { lastAuditParams = url.searchParams; data = { total: 1, items: [{ id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', operation: 'research', status: 'completed', started_at: '2026-09-28T19:00:00Z', duration_ms: 130 }] }; }
-    else if (url.pathname === '/api/admin/audits/sample-run') data = { id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', status: 'completed', operation: 'research', started_at: '2026-09-28T19:00:00Z', response: { synthesis: 'VISUAL TEST DATA [PMID: 12345].', retrieved_papers: [], evidence_table: [] }, trace: { query_plan: { original_query: 'kidney outcomes', canonical_query: 'kidney outcomes', route: 'SIMPLE' }, stages: [{ stage: 'retrieve', status: 'completed' }], citation_audit: { valid: true }, timings_ms: { total: 130 } }, events: [{ stage: 'retrieve', payload: { status: 'completed' } }] };
+    else if (url.pathname === '/api/admin/audits') { lastAuditParams = url.searchParams; data = { total: 1, items: [{ id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', operation: 'conversation_turn', status: 'completed', started_at: '2026-09-28T19:00:00Z', duration_ms: 130, conversation_id: 'conversation-1', turn_id: 'turn-1', answer_status: 'SUPPORTED' }] }; }
+    else if (url.pathname === '/api/admin/audits/sample-run') data = { id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', status: 'completed', operation: 'conversation_turn', started_at: '2026-09-28T19:00:00Z', conversation_id: 'conversation-1', turn_id: 'turn-1', agent_action: 'RESEARCH', agent_complexity_hint: 'MODERATE', rule_route: 'SIMPLE', final_route: 'MODERATE', answer_status: 'SUPPORTED', correction_count: 1, evidence_gaps: ['Missing pediatric evidence'], stage_durations_ms: { retrieve: 12, judge: 8 }, response: { synthesis: 'VISUAL TEST DATA [PMID: 12345].', retrieved_papers: [], evidence_table: [] }, trace: { citation_audit: { valid: true }, timings_ms: { total: 130 } }, events: [{ stage: 'agent_decision', timestamp: '2026-09-28T19:00:00Z', payload: { action: 'RESEARCH' } }, { stage: 'query_enhanced', payload: { iteration: 0 } }, { stage: 'route_arbitrated', payload: { route: 'MODERATE' } }, { stage: 'retrieve', payload: { status: 'completed' } }, { stage: 'judge', payload: { status: 'completed' } }, { stage: 'claim_verified', payload: { claim_count: 1 } }, { stage: 'answer_released', payload: { status: 'SUPPORTED' } }] };
     else if (url.pathname === '/api/admin/observability') data = { total_queries: 1, by_status: { completed: 1 }, by_operation: { research: 1 }, average_duration_ms: 130, p95_duration_ms: 130 };
     else if (url.pathname === '/api/admin/accounts') { if (request.method() === 'POST') { createdAccount = body; data = { id: 'new-account', ...body }; } else { const offset = Number(url.searchParams.get('offset') || 0); const limit = Number(url.searchParams.get('limit') || 50); const accounts = Array.from({ length: 26 }, (_, index) => ({ ...session, id: `account-${index}`, username: index === 25 ? 'last-page-reader' : `reader-${index}`, display_name: index === 25 ? 'Last Page Reader' : `Reader ${index}` })); data = { total: accounts.length, items: accounts.slice(offset, offset + limit) }; } }
     else if (url.pathname === '/api/auth/password') { session = null; data = { password_changed: true, sign_in_again: true }; }
@@ -90,6 +90,9 @@ async function scenario(role, width) {
     } else {
       await page.getByRole('link', { name: 'Audit logs' }).click();
       await page.getByText('kidney outcomes').waitFor();
+      await page.getByText('conversation-1').waitFor();
+      await page.getByText('turn-1').waitFor();
+      await page.getByText('SUPPORTED').first().waitFor();
       await page.getByLabel('From date').fill('2026-09-28');
       await page.getByLabel('To date').fill('2026-09-28');
       await page.getByRole('button', { name: 'Apply filters' }).click();
@@ -98,6 +101,8 @@ async function scenario(role, width) {
       assert.equal(lastAuditParams.get('to_date'), '2026-09-29');
       await page.getByRole('link', { name: 'View trace' }).click();
       await page.getByText('Citation validation').waitFor();
+      for (const phase of ['Agent decision', 'Query enhanced', 'Route arbitrated', 'Retrieval/Judge loop', 'Claim verification', 'Release']) await page.getByRole('heading', { name: phase }).waitFor();
+      await page.getByText('Missing pediatric evidence').waitFor();
       if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/audit-${width}.png`, fullPage: true });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.getByRole('link', { name: 'Observability' }).click();
@@ -125,6 +130,11 @@ async function scenario(role, width) {
     await page.getByLabel('Research message').fill('kidney outcomes');
     await page.getByRole('button', { name: 'Send' }).click();
     await page.getByText('VISUAL TEST DATA', { exact: false }).waitFor();
+    if (role === 'admin') {
+      const turnAuditLink = page.getByRole('link', { name: 'View turn audit' });
+      await turnAuditLink.waitFor();
+      assert.equal(await turnAuditLink.getAttribute('href'), '/admin/audits/visual-run-visual-turn-1');
+    }
     await page.locator('.citation-button').last().click();
     await page.getByRole('tab', { name: /Illustrative research record/i }).waitFor();
     assert.equal(await page.getByRole('tab').count(), 2, 'source citation opens one paper tab beside Overview');
