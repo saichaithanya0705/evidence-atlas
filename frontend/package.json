@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:ui-stress": "node tests/ui-stress.mjs"
+    "test:ui-stress": "node tests/ui-stress.mjs",
+    "test:ui-preview": "node tests/ui-preview.mjs",
+    "test:ui-accounts": "node tests/ui-accounts.mjs"
   },
   "engines": {
     "node": ">=20.19.0"

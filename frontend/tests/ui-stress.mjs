@@ -1,16 +1,24 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(here, "../..");
-const outputDir = path.join(projectRoot, "data/evaluation/ui-stress");
+import os from "node:os";
+const outputDir = process.env.UI_STRESS_OUTPUT || path.join(os.tmpdir(), "evidence-atlas-ui-stress");
 const targetUrl = process.env.UI_STRESS_URL || "http://127.0.0.1:5173";
 const browserPath = process.env.PLAYWRIGHT_BROWSER_PATH ||
   "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const requestTimeoutMs = Number(process.env.UI_STRESS_TIMEOUT_MS || 240_000);
 const onlyScenario = process.env.UI_STRESS_ONLY || "";
+const userName = process.env.UI_STRESS_USERNAME;
+const userPassword = process.env.UI_STRESS_PASSWORD;
+if (!userName || !userPassword) throw new Error("Set UI_STRESS_USERNAME and UI_STRESS_PASSWORD for an ordinary-user account before running live stress tests.");
+
+async function signIn(page, username, password) {
+  await page.goto(`${targetUrl}/login`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("heading", { name: /Medical evidence/i }).waitFor({ timeout: 30_000 });
+}
 
 const queries = [
   "What are the kidney outcomes of SGLT2 inhibitors in chronic kidney disease?",
@@ -57,13 +65,12 @@ async function runUser(browser, { query, label, viewport = { width: 1440, height
   });
 
   try {
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await signIn(page, userName, userPassword);
     await page.getByText("Research service connected", { exact: true }).first().waitFor({
       state: "attached",
       timeout: 30_000,
     });
-    const storedAdminKey = await page.evaluate(() => sessionStorage.getItem("evidence-atlas-admin-key"));
-    if (storedAdminKey) throw new Error("Fresh ordinary-user context unexpectedly contained an admin key");
+    if (await page.getByRole("link", { name: "Audit logs" }).count()) throw new Error("Ordinary-user context exposed administrator navigation");
 
     await page.locator("#research-query").fill(query);
     await page.getByRole("button", { name: "Research", exact: true }).click();
@@ -143,10 +150,11 @@ async function runUser(browser, { query, label, viewport = { width: 1440, height
 }
 
 async function validateYearRange(browser) {
+  if (!process.env.UI_STRESS_ADMIN_USERNAME || !process.env.UI_STRESS_ADMIN_PASSWORD) return { ok: true, skipped: "No administrator stress-test credentials configured" };
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   try {
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await signIn(page, process.env.UI_STRESS_ADMIN_USERNAME, process.env.UI_STRESS_ADMIN_PASSWORD);
     await page.locator("#research-query").fill(queries[0]);
     await page.getByLabel("Publication year from").selectOption("2025");
     await page.getByLabel("Publication year to").selectOption("2020");

@@ -11,7 +11,7 @@ from time import perf_counter
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from backend.app.evidence.extraction import EvidenceAnalyzer, EvidenceExtractor
 from backend.app.models.request_response import ResearchResponse, RetrievalCandidate
@@ -70,6 +70,7 @@ class _WorkflowState:
     pending_details: Dict[str, Any] = field(default_factory=dict)
     next_query: Optional[str] = None
     timings_ms: List[Dict[str, Any]] = field(default_factory=list)
+    event_sink: Optional[Callable[[str, Dict[str, Any]], None]] = field(default=None, repr=False)
 
 
 class _GraphInput(TypedDict):
@@ -275,7 +276,9 @@ class ResearchService:
         if target not in self._TRANSITIONS.get(state.active_stage, set()):
             raise RuntimeError(f"Invalid research workflow transition: {state.active_stage} -> {target}")
         state.active_stage = target
-        state.stages.append({"stage": target, "status": "completed", **details})
+        state.stages.append({"stage": target, "status": "started", **details})
+        if state.event_sink:
+            state.event_sink(target, {"status": "started", **details})
 
     @staticmethod
     def _merge_candidates(
@@ -359,6 +362,7 @@ class ResearchService:
         user_filters: Optional[Dict[str, Any]] = None,
         max_loops: int = 2,
         request_id: Optional[str] = None,
+        event_sink: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     ) -> ResearchResponse:
         """Run the bounded route→retrieve→judge→correct→evidence→validate graph."""
         if not query or not query.strip():
@@ -367,7 +371,7 @@ class ResearchService:
         filters = self._normalize_user_filters(user_filters)
         configured_budget = max(0, int(getattr(self.settings, "MAX_CORRECTIVE_LOOPS", max_loops)))
         budget = min(max(0, int(max_loops)), configured_budget)
-        state = _WorkflowState(request_id=request_id, query=query, user_filters=filters)
+        state = _WorkflowState(request_id=request_id, query=query, user_filters=filters, event_sink=event_sink)
         research_started = perf_counter()
         from langgraph.graph import END, START, StateGraph
 
@@ -603,19 +607,49 @@ class ResearchService:
             return {"workflow": workflow}
 
         def timed_node(name: str, node: Any) -> Any:
+            def completed_details(workflow: _WorkflowState) -> Dict[str, Any]:
+                if name == "query_analysis" and workflow.initial_plan:
+                    return {"query_plan": workflow.initial_plan.model_dump(mode="json", exclude={"embeddings"}), "route": workflow.current_route}
+                if name == "retrieve":
+                    return {"candidate_pmids": [item.pmid for item in workflow.pending_candidates], "retrieval": workflow.pending_details.get("retrieval", {}), "reranker": workflow.pending_details.get("reranker", {})}
+                if name == "judge" and workflow.grade:
+                    return {"grade": workflow.grade.to_dict() if hasattr(workflow.grade, "to_dict") else dict(workflow.grade), "stop_reason": workflow.stop_reason}
+                if name == "evidence":
+                    return {"evidence_count": len(workflow.evidence_records), "evidence": [{"pmid": record.pmid, "supporting_text_spans": [str(span)[:1000] for span in record.supporting_text_spans[:3]]} for record in workflow.evidence_records[:20]]}
+                if name == "validate":
+                    return {"citation_audit": workflow.trace_payload.get("citation_audit", {}), "cited_pmids": workflow.response.cited_pmids if workflow.response else []}
+                if name == "done":
+                    return {"stop_reason": workflow.stop_reason}
+                return {}
+
             def wrapped(data: _GraphInput) -> Dict[str, _WorkflowState]:
                 started = perf_counter()
+                status = "completed"
                 try:
                     return node(data)
+                except Exception:
+                    status = "failed"
+                    raise
                 finally:
                     workflow = data["workflow"]
+                    duration_ms = round((perf_counter() - started) * 1000, 2)
                     workflow.timings_ms.append(
                         {
                             "stage": name,
                             "iteration": workflow.iteration if name in {"retrieve", "judge", "correct"} else None,
-                            "duration_ms": round((perf_counter() - started) * 1000, 2),
+                            "duration_ms": duration_ms,
                         }
                     )
+                    for stage in reversed(workflow.stages):
+                        if stage.get("stage") == name and stage.get("status") == "started":
+                            stage["status"] = status
+                            stage["duration_ms"] = duration_ms
+                            break
+                    if workflow.event_sink:
+                        payload = {"status": status, "duration_ms": duration_ms}
+                        if status == "completed":
+                            payload.update(completed_details(workflow))
+                        workflow.event_sink(name, payload)
             return wrapped
 
         graph = StateGraph(_GraphInput)

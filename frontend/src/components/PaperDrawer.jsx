@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Icon from "./Icon.jsx";
+import Modal from "./Modal.jsx";
 import { formatScore, formatValue, pubmedUrl } from "../utils.js";
 
 const tabs = ["Overview", "Evidence", "Provenance", "Related"];
@@ -149,7 +150,6 @@ export default function PaperDrawer({
   evidence,
   papers,
   active,
-  mobileOpen,
   onSelect,
   onClose,
   isAdmin,
@@ -157,21 +157,15 @@ export default function PaperDrawer({
   const [activeTab, setActiveTab] = useState("Overview");
 
   if (!selectedPaper) {
-    return (
-      <aside className="panel paper-drawer empty-drawer" aria-label="Selected paper details">
-        <div className="panel-heading">
-          <h2><Icon name="file" size={19} /> Selected paper</h2>
-        </div>
-        <p>Select a ranked paper to inspect its abstract and bibliographic details.</p>
-      </aside>
-    );
+    return null;
   }
 
-  const paper = paperDetails || selectedPaper;
+  const paper = { ...selectedPaper, ...paperDetails };
   return (
-    <aside
-      className={"panel paper-drawer" + (mobileOpen ? " mobile-open" : "")}
-      aria-label={"Selected paper details for PMID " + selectedPaper.pmid}
+    <Modal
+      className="panel paper-drawer"
+      label={"Selected paper details for PMID " + selectedPaper.pmid}
+      onClose={onClose}
     >
       <div className="panel-heading drawer-heading">
         <h2><Icon name="file" size={19} /> Selected paper</h2>
@@ -194,13 +188,12 @@ export default function PaperDrawer({
             </a>
           )}
         </div>
-        <div className="drawer-tabs" role="tablist" aria-label="Selected paper views">
+        <div className="drawer-tabs" role="group" aria-label="Selected paper views">
           {(isAdmin ? tabs : ["Overview"]).map((tab) => (
             <button
               key={tab}
               type="button"
-              role="tab"
-              aria-selected={activeTab === tab}
+              aria-pressed={activeTab === tab}
               onClick={() => setActiveTab(tab)}
             >
               {tab}
@@ -213,6 +206,6 @@ export default function PaperDrawer({
         {isAdmin && activeTab === "Provenance" && <PaperProvenance paper={paper} />}
         {isAdmin && activeTab === "Related" && <RelatedPapers paper={paper} papers={papers} onSelect={onSelect} />}
       </div>
-    </aside>
+    </Modal>
   );
 }

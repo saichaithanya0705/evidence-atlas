@@ -8,14 +8,14 @@ the server process trees so Ctrl+C and startup errors do not leave them running.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
-import secrets
+import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from urllib.error import URLError
@@ -24,7 +24,6 @@ from urllib.request import urlopen
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 LOGS_ROOT = PROJECT_ROOT / "logs"
-ADMIN_KEY_ASSIGNMENT = re.compile(r"^(\s*ADMIN_API_KEY\s*=)(.*)$", re.IGNORECASE)
 
 
 def _step(label: str, command: list[str], cwd: Path = PROJECT_ROOT, dry_run: bool = False) -> None:
@@ -40,9 +39,76 @@ def _step(label: str, command: list[str], cwd: Path = PROJECT_ROOT, dry_run: boo
 def _npm_command(*args: str) -> list[str]:
     if os.name == "nt":
         comspec = os.environ.get("COMSPEC", "cmd.exe")
-        command = subprocess.list2cmdline(["npm", *args])
+        npm = shutil.which("npm.cmd") or "npm.cmd"
+        command = subprocess.list2cmdline([npm, *args])
         return [comspec, "/d", "/s", "/c", command]
     return ["npm", *args]
+
+
+def _ensure_node_path() -> None:
+    """Make a standard per-user Node installation visible to npm subprocesses."""
+    npm_name = "npm.cmd" if os.name == "nt" else "npm"
+    if not (shutil.which("node") and shutil.which(npm_name)) and os.name == "nt":
+        for directory in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "nodejs", Path(os.environ.get("ProgramFiles", "")) / "nodejs"):
+            if (directory / "node.exe").is_file() and (directory / "npm.cmd").is_file():
+                os.environ["PATH"] = str(directory) + os.pathsep + os.environ.get("PATH", "")
+                break
+    node = shutil.which("node")
+    npm = shutil.which(npm_name)
+    if not node or not npm:
+        raise RuntimeError("Node.js and npm are required. Install Node.js 22.12+ and reopen the terminal.")
+    version = subprocess.check_output([node, "--version"], text=True).strip()
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
+    supported = bool(match) and (int(match.group(1)) == 20 and int(match.group(2)) >= 19 or int(match.group(1)) == 22 and int(match.group(2)) >= 12 or int(match.group(1)) >= 23)
+    if not supported:
+        raise RuntimeError(f"Node {version} is unsupported by Vite. Install Node.js 20.19+ or 22.12+ and reopen the terminal.")
+
+
+def _indices_ready() -> bool:
+    """Reuse an intact index only when its corpus and source have not changed."""
+    raw = PROJECT_ROOT / "data/raw/pubmed_sample.csv"
+    cleaned = PROJECT_ROOT / "data/processed/cleaned_pubmed.parquet"
+    preprocessing = PROJECT_ROOT / "data/manifests/preprocessing_manifest.json"
+    index = PROJECT_ROOT / "data/manifests/index_manifest.json"
+    required = [raw, cleaned, preprocessing, index,
+                PROJECT_ROOT / "data/processed/cleaned_pubmed.jsonl",
+                PROJECT_ROOT / "data/processed/article_embeddings.npy",
+                PROJECT_ROOT / "data/processed/bm25_index.pkl",
+                PROJECT_ROOT / "data/processed/mesh_dictionary.json",
+                PROJECT_ROOT / "data/processed/mesh_graph.gpickle",
+                PROJECT_ROOT / "data/qdrant_storage/collection"]
+    if not all(path.exists() for path in required):
+        return False
+    if raw.stat().st_mtime > preprocessing.stat().st_mtime or cleaned.stat().st_mtime > index.stat().st_mtime:
+        return False
+    try:
+        data = json.loads(index.read_text(encoding="utf-8"))
+        expected = data["corpus"]["sha256"]
+        points = data["vector_store"]["points_count"]
+        if points <= 0 or points != data["corpus"]["total_records"]:
+            return False
+        digest = hashlib.sha256()
+        with cleaned.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == expected
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _ensure_first_administrator() -> None:
+    from backend.app.core.config import get_settings
+    from backend.app.storage.accounts import AccountStore
+    from backend.app.storage.database import initialize_db
+
+    path = get_settings().APP_DATABASE_PATH
+    initialize_db(path)
+    if AccountStore(path).list_accounts(limit=1)["total"]:
+        return
+    if not sys.stdin.isatty():
+        raise RuntimeError("No administrator exists. Run: .venv\\Scripts\\python.exe scripts\\manage_accounts.py bootstrap-admin --username administrator")
+    print("\nFirst-time account setup: create the administrator before the servers start.", flush=True)
+    _step("Create first administrator", [sys.executable, "scripts/manage_accounts.py", "bootstrap-admin", "--username", "administrator"])
 
 
 def _preflight(dry_run: bool) -> None:
@@ -50,68 +116,6 @@ def _preflight(dry_run: bool) -> None:
         raise FileNotFoundError(f"Vite application manifest not found: {FRONTEND_ROOT / 'package.json'}")
     if not dry_run and not (PROJECT_ROOT / ".env").is_file():
         raise FileNotFoundError(".env is missing. Run start.bat so it can copy .env.example first.")
-
-
-def ensure_admin_api_key(env_path: Path) -> str:
-    """Ensure .env has a strong admin key without replacing an existing value.
-
-    Writes a missing/blank value with an atomic same-directory replace. Returns
-    only a status label; the generated credential is never printed or returned.
-    """
-    if not env_path.is_file():
-        raise FileNotFoundError(f"Cannot provision admin access without an environment file: {env_path}")
-
-    original = env_path.read_text(encoding="utf-8")
-    lines = original.splitlines()
-    assignments: list[tuple[int, str, str]] = []
-    for index, line in enumerate(lines):
-        match = ADMIN_KEY_ASSIGNMENT.match(line)
-        if match:
-            raw_value = match.group(2).strip()
-            if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in "\"'":
-                raw_value = raw_value[1:-1].strip()
-            assignments.append((index, match.group(1), raw_value))
-
-    if any(value for _, _, value in assignments):
-        return "preserved"
-
-    generated_key = secrets.token_urlsafe(48)
-    if assignments:
-        index, prefix, _ = assignments[-1]
-        lines[index] = f"{prefix}{generated_key}"
-    else:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.extend(("# Generated locally by start.bat; do not commit or share.", f"ADMIN_API_KEY={generated_key}"))
-
-    newline = "\r\n" if "\r\n" in original else "\n"
-    updated = newline.join(lines)
-    if original.endswith(("\n", "\r")):
-        updated += newline
-
-    file_mode = env_path.stat().st_mode & 0o777
-    temp_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="",
-            prefix=".env-admin-",
-            suffix=".tmp",
-            dir=env_path.parent,
-            delete=False,
-        ) as temp_file:
-            temp_name = temp_file.name
-            temp_file.write(updated)
-            temp_file.flush()
-            os.fsync(temp_file.fileno())
-        os.chmod(temp_name, file_mode)
-        os.replace(temp_name, env_path)
-        temp_name = None
-    finally:
-        if temp_name and os.path.exists(temp_name):
-            os.unlink(temp_name)
-    return "generated"
 
 
 def _read_setting(name: str, default: str) -> str:
@@ -206,6 +210,7 @@ def _start_servers(dry_run: bool = False) -> None:
         web = subprocess.Popen(
             frontend_command,
             cwd=FRONTEND_ROOT,
+            env={**os.environ, "VITE_BACKEND_PORT": api_port},
             stdout=frontend_log,
             stderr=subprocess.STDOUT,
             creationflags=process_flags,
@@ -241,11 +246,7 @@ def _start_servers(dry_run: bool = False) -> None:
 def prepare_and_run(offline: bool = False, dry_run: bool = False) -> None:
     _preflight(dry_run)
     if not dry_run:
-        admin_key_status = ensure_admin_api_key(PROJECT_ROOT / ".env")
-        if admin_key_status == "generated":
-            print("Generated ADMIN_API_KEY in .env (value not displayed).", flush=True)
-        else:
-            print("Preserved the existing ADMIN_API_KEY in .env.", flush=True)
+        _ensure_node_path()
     if offline:
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -290,9 +291,13 @@ def prepare_and_run(offline: bool = False, dry_run: bool = False) -> None:
         return
 
     _step("Download/verify MedCPT models and prepare dataset", setup_command)
-    for label, command in pipeline_commands:
-        _step(label, command)
+    if not os.environ.get("PUBMED_FORCE_REINDEX") and _indices_ready():
+        print("Existing PubMed index matches the processed corpus; skipping repeated indexing.", flush=True)
+    else:
+        for label, command in pipeline_commands:
+            _step(label, command)
     _step("Install frontend dependencies", _npm_command("install"), cwd=FRONTEND_ROOT)
+    _ensure_first_administrator()
     _start_servers()
 
 
@@ -300,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--offline", action="store_true", help="Use local cached models only and allow explicitly marked mock embeddings")
     parser.add_argument("--dry-run", action="store_true", help="Print the setup/startup commands without changing files or starting services")
+    parser.add_argument("--check-runtime", action="store_true", help="Check Node/npm before dependency downloads or indexing")
     args = parser.parse_args(argv)
 
     def stop_on_terminate(signum, frame):
@@ -307,7 +313,11 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGTERM, stop_on_terminate)
     try:
-        prepare_and_run(offline=args.offline, dry_run=args.dry_run)
+        if args.check_runtime:
+            _ensure_node_path()
+            print("Node.js and npm preflight passed.", flush=True)
+        else:
+            prepare_and_run(offline=args.offline, dry_run=args.dry_run)
     except KeyboardInterrupt:
         print("\nShutdown requested.", flush=True)
     except (OSError, RuntimeError, ValueError) as exc:

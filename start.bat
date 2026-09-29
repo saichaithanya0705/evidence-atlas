@@ -44,6 +44,9 @@ set "PYTHON=%CD%\.venv\Scripts\python.exe"
 set "PYTHONUTF8=1"
 set "PYTHONPATH=%CD%"
 
+"%PYTHON%" scripts\setup_project.py --check-runtime
+if errorlevel 1 goto failed
+
 "%PYTHON%" -m pip --version >nul 2>nul
 if not errorlevel 1 goto pip_ready
 echo The existing virtual environment has no pip module. Repairing it with ensurepip...
@@ -69,6 +72,7 @@ if not exist "PubMed_Phrases.tar.gz" (
     exit /b 1
 )
 if not defined PUBMED_INGEST_LIMIT set "PUBMED_INGEST_LIMIT=100000"
+set "PUBMED_FORCE_REINDEX=1"
 echo Building the real PubMed corpus from phrase PMIDs and official NCBI records...
 "%PYTHON%" scripts\ingest_pubmed_phrases.py --limit "%PUBMED_INGEST_LIMIT%" --output data\raw\pubmed_sample.csv
 if errorlevel 1 goto failed

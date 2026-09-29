@@ -228,7 +228,6 @@ def test_research_graph_routes_sufficient_evidence_directly_to_synthesis():
     service = make_test_service(judge=AlwaysSufficientJudge())
     result = service.research("Empagliflozin diabetes kidney outcomes", max_loops=2, request_id="sufficient-test")
     trace = service.get_trace("sufficient-test")
-
     assert result.citations_valid is True
     assert len(trace["retrieval_iterations"]) == 1
     assert trace["corrective_queries"] == []
@@ -237,6 +236,21 @@ def test_research_graph_routes_sufficient_evidence_directly_to_synthesis():
     assert stage_names.index("judge") < stage_names.index("evidence")
     assert "correct" not in stage_names
 
+
+def test_failed_synthesis_has_accurate_durable_stage_events():
+    class BrokenSynthesizer:
+        def synthesize(self, *args, **kwargs):
+            raise RuntimeError("provider failed")
+
+    service = make_test_service(judge=AlwaysSufficientJudge(), synthesizer=BrokenSynthesizer())
+    events = []
+    with pytest.raises(RuntimeError, match="provider failed"):
+        service.research("Empagliflozin kidney outcomes", max_loops=0, request_id="failed-synthesis", event_sink=lambda stage, payload: events.append((stage, payload)))
+    synthesize = [payload for stage, payload in events if stage == "synthesize"]
+    assert [event["status"] for event in synthesize] == ["started", "failed"]
+    assert any(stage == "query_analysis" and payload.get("status") == "completed" and payload.get("query_plan") for stage, payload in events)
+    assert any(stage == "retrieve" and payload.get("status") == "completed" and payload.get("candidate_pmids") for stage, payload in events)
+    assert any(stage == "evidence" and payload.get("status") == "completed" and payload.get("evidence_count") for stage, payload in events)
 
 def test_corrective_query_stops_instead_of_adding_arbitrary_numbers():
     service = make_test_service()

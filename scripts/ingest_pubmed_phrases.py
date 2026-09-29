@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
@@ -26,6 +28,9 @@ from xml.etree import ElementTree as ET
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+EUROPE_PMC_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+NCBI_SOURCE = "NCBI PubMed E-utilities"
+EUROPE_PMC_SOURCE = "Europe PMC REST API"
 FIELDS = [
     "pmid", "title", "abstract", "authors", "journal", "publication_date",
     "publication_date_raw", "year", "study_type", "publication_types",
@@ -192,6 +197,141 @@ def parse_articles(xml_bytes: bytes) -> list[dict[str, str]]:
     return records
 
 
+def _plain_text(value: object) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return " ".join(html.unescape(text).split())
+
+
+def parse_europe_pmc_results(payload: bytes) -> list[dict[str, str]]:
+    results = json.loads(payload.decode("utf-8")).get("resultList", {}).get("result", [])
+    records: list[dict[str, str]] = []
+    for item in results:
+        pmid = str(item.get("pmid") or item.get("id") or "")
+        title = _plain_text(item.get("title"))
+        abstract = _plain_text(item.get("abstractText"))
+        if not pmid or not title or not abstract:
+            continue
+
+        journal_info = item.get("journalInfo") or {}
+        journal = journal_info.get("journal") or {}
+        publication_date_raw = str(
+            journal_info.get("dateOfPublication") or item.get("firstPublicationDate") or ""
+        )
+        publication_date = str(
+            item.get("firstPublicationDate")
+            or journal_info.get("printPublicationDate")
+            or publication_date_raw
+        )
+        year = str(journal_info.get("yearOfPublication") or item.get("pubYear") or "")
+        publication_types = (item.get("pubTypeList") or {}).get("pubType", [])
+        mesh_terms = [
+            str(entry.get("descriptorName"))
+            for entry in (item.get("meshHeadingList") or {}).get("meshHeading", [])
+            if entry.get("descriptorName")
+        ]
+        keywords = (item.get("keywordList") or {}).get("keyword", [])
+        records.append({
+            "pmid": pmid,
+            "title": title,
+            "abstract": abstract,
+            "authors": _plain_text(item.get("authorString")),
+            "journal": _plain_text(journal.get("title") or journal.get("medlineAbbreviation")),
+            "publication_date": publication_date,
+            "publication_date_raw": publication_date_raw,
+            "year": year,
+            "study_type": str(publication_types[0]) if publication_types else "Other",
+            "publication_types": "; ".join(map(str, publication_types)),
+            "mesh_terms": "; ".join(mesh_terms),
+            "keywords": "; ".join(map(str, keywords)),
+            "doi": str(item.get("doi") or ""),
+        })
+    return records
+
+
+def fetch_europe_pmc_records(pmids: list[str], attempts: int = 8) -> list[dict[str, str]]:
+    query = "EXT_ID:(" + " OR ".join(pmids) + ") AND SRC:MED"
+    url = EUROPE_PMC_URL + "?" + urlencode({
+        "query": query,
+        "format": "json",
+        "resultType": "core",
+        "pageSize": 1000,
+    })
+    request = Request(url, headers={"User-Agent": "EvidenceAtlasCapstone/1.0"})
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=90) as response:
+                return parse_europe_pmc_results(response.read())
+        except Exception:
+            if attempt == attempts:
+                raise
+            time.sleep(min(30.0, 1.5 * (2 ** (attempt - 1))))
+    raise RuntimeError("Europe PMC request exhausted its retry budget")
+
+
+def fetch_records(
+    pmids: list[str], email: str = "", prefer_europe_pmc: bool = False
+) -> tuple[list[dict[str, str]], str]:
+    if prefer_europe_pmc:
+        return fetch_europe_pmc_records(pmids), EUROPE_PMC_SOURCE
+    try:
+        return parse_articles(fetch_pubmed_xml(pmids, email)), NCBI_SOURCE
+    except HTTPError as exc:
+        if exc.code != 403:
+            raise
+        print(
+            "NCBI E-utilities is forbidden by this network; falling back to Europe PMC MED records.",
+            flush=True,
+        )
+        return fetch_europe_pmc_records(pmids), EUROPE_PMC_SOURCE
+
+
+def _selection_sha256(pmids: list[str]) -> str:
+    return hashlib.sha256("\n".join(pmids).encode("ascii")).hexdigest()
+
+
+def append_checkpoint_batch(
+    checkpoint: Path,
+    selected_pmids: list[str],
+    requested_pmids: list[str],
+    records: list[dict[str, str]],
+    source: str,
+) -> None:
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "selection_sha256": _selection_sha256(selected_pmids),
+        "requested_pmids": requested_pmids,
+        "records": records,
+        "source": source,
+    }
+    with checkpoint.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def load_ingestion_checkpoint(
+    checkpoint: Path, selected_pmids: list[str]
+) -> tuple[list[dict[str, str]], set[str], str]:
+    if not checkpoint.is_file():
+        return [], set(), NCBI_SOURCE
+    expected_hash = _selection_sha256(selected_pmids)
+    records: list[dict[str, str]] = []
+    completed: set[str] = set()
+    source = NCBI_SOURCE
+    with checkpoint.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                break
+            if entry.get("selection_sha256") != expected_hash:
+                return [], set(), NCBI_SOURCE
+            completed.update(map(str, entry.get("requested_pmids", [])))
+            records.extend(entry.get("records", []))
+            source = str(entry.get("source") or source)
+    return records, completed, source
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, default=PROJECT_ROOT / "PubMed_Phrases.tar.gz")
@@ -209,22 +349,40 @@ def main() -> int:
 
     mapping = phrase_pmids(args.archive, phrases)
     selected = select_pmids(mapping, args.limit)
-    records: list[dict[str, str]] = []
-    for offset in range(0, len(selected), 100):
-        chunk = selected[offset : offset + 100]
-        records.extend(parse_articles(fetch_pubmed_xml(chunk, args.email)))
-        completed = min(offset + len(chunk), len(selected))
+    checkpoint_path = args.output.with_suffix(".ingestion_checkpoint.jsonl")
+    records, completed_pmids, record_source = load_ingestion_checkpoint(checkpoint_path, selected)
+    if completed_pmids:
+        print(
+            f"Resuming after {len(completed_pmids)}/{len(selected)} requested PubMed records; "
+            f"{len(records)} usable records restored from checkpoint.",
+            flush=True,
+        )
+    pending = [pmid for pmid in selected if pmid not in completed_pmids]
+    offset = 0
+    while offset < len(pending):
+        batch_size = 500 if record_source == EUROPE_PMC_SOURCE else 100
+        chunk = pending[offset : offset + batch_size]
+        batch_records, record_source = fetch_records(
+            chunk,
+            args.email,
+            prefer_europe_pmc=record_source == EUROPE_PMC_SOURCE,
+        )
+        records.extend(batch_records)
+        append_checkpoint_batch(checkpoint_path, selected, chunk, batch_records, record_source)
+        completed_pmids.update(chunk)
+        completed = len(completed_pmids)
         if completed == len(selected) or completed % 1000 == 0:
             print(
                 f"Fetched {completed}/{len(selected)} requested PubMed records; "
                 f"{len(records)} currently have usable abstracts.",
                 flush=True,
             )
-        if offset + 100 < len(selected):
+        offset += len(chunk)
+        if offset < len(pending):
             time.sleep(0.4)
     records = list({record["pmid"]: record for record in records}.values())
     if not records:
-        raise RuntimeError("NCBI returned no title-and-abstract records")
+        raise RuntimeError("The biomedical literature source returned no title-and-abstract records")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     backup = args.output.with_name(f"{args.output.stem}.pre_ingest_backup{args.output.suffix}")
@@ -247,8 +405,9 @@ def main() -> int:
 
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "NCBI PubMed E-utilities",
-        "source_url": EFETCH_URL,
+        "source": record_source,
+        "source_url": EUROPE_PMC_URL if record_source == EUROPE_PMC_SOURCE else EFETCH_URL,
+        "upstream_corpus": "PubMed/MEDLINE",
         "phrase_archive": str(args.archive.resolve()),
         "phrase_archive_sha256": sha256_file(args.archive),
         "phrases": phrases,
@@ -266,6 +425,7 @@ def main() -> int:
     )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    checkpoint_path.unlink(missing_ok=True)
     print(json.dumps(manifest, indent=2))
     return 0
 

@@ -12,6 +12,8 @@ export default function SearchBar({
   setFilters,
   onResearch,
   loading,
+  hasSearched,
+  isAdmin = false,
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -20,8 +22,11 @@ export default function SearchBar({
   }
 
   return (
-    <section className="search-section" aria-labelledby="page-title">
-      <h1 id="page-title">Search medical evidence, not just abstracts</h1>
+    <section className={"search-section" + (hasSearched ? " has-results" : "")} aria-labelledby="page-title">
+      <div className="search-introduction">
+        <h1 id="page-title">Medical evidence.<br /><em>A clearer perspective.</em></h1>
+        <p>Ask a focused question. Explore the literature. Read the evidence in context.</p>
+      </div>
       <form className="search-form" onSubmit={onResearch}>
         <div className="query-field">
           <Icon name="search" size={20} />
@@ -48,7 +53,9 @@ export default function SearchBar({
         <button className="research-button" type="submit" disabled={loading || !query.trim()}>
           {loading ? <span className="button-spinner" /> : null}
           {loading ? "Researching" : "Research"}
+          {!loading && <Icon name="arrow" size={19} />}
         </button>
+        {isAdmin && <div className="search-filters">
         <label className="filter-field">
           <span>From year</span>
           <select
@@ -88,15 +95,17 @@ export default function SearchBar({
           className={"advanced-toggle" + (advancedOpen ? " is-open" : "")}
           type="button"
           aria-expanded={advancedOpen}
+          aria-controls="advanced-options"
           onClick={() => setAdvancedOpen((open) => !open)}
         >
           <Icon name="filter" size={18} />
-          Advanced
+          Advanced filters
           <Icon name="chevron" size={14} className="advanced-chevron" />
         </button>
+        </div>}
       </form>
-      {advancedOpen && (
-        <div className="advanced-options">
+      {isAdmin && advancedOpen && (
+        <div className="advanced-options" id="advanced-options">
           <label className="filter-field compact-field">
             <span>Corrective retrieval attempts</span>
             <select
@@ -111,6 +120,14 @@ export default function SearchBar({
           <p>The search will apply these filters and pass the requested retrieval budget to the API.</p>
         </div>
       )}
+      {!hasSearched && <div className="example-questions">
+        <span>Try an example question:</span>
+        {["SGLT2 inhibitors and kidney outcomes", "Exercise and blood pressure"].map(example =>
+          <button type="button" key={example} onClick={() => {
+            setQuery(example);
+            document.getElementById("research-query")?.focus();
+          }}>{example}<Icon name="arrow" size={14} /></button>)}
+      </div>}
     </section>
   );
 }

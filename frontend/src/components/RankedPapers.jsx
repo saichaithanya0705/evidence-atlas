@@ -49,6 +49,7 @@ export default function RankedPapers({
   loading,
   hasSearched,
   isAdmin,
+  error,
 }) {
   return (
     <section className="panel ranked-panel" aria-labelledby="ranked-heading">
@@ -67,6 +68,8 @@ export default function RankedPapers({
             <strong>Retrieving and reviewing evidence</strong>
             <span>The service is processing this research question.</span>
           </div>
+        ) : error ? (
+          <div className="results-state"><Icon name="alert" size={28} /><strong>Sources could not be loaded</strong><span>This is a request failure, not a finding of no evidence.</span></div>
         ) : papers.length ? (
           papers.map((paper, index) => (
             <PaperRow
@@ -87,8 +90,8 @@ export default function RankedPapers({
         ) : (
           <div className="results-state">
             <Icon name="book" size={25} />
-            <strong>Your sources will appear here</strong>
-            <span>Enter a medical research question to retrieve ranked papers.</span>
+            <strong>Your reading list starts here</strong>
+            <span>Ask a research question to find and compare relevant papers. Select a source to read its abstract in context.</span>
           </div>
         )}
       </div>

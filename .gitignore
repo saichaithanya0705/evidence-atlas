@@ -37,6 +37,7 @@ data/qdrant_storage/
 data/processed/
 data/full_index_staging/
 data/index_backups/
+data/app/
 data/temporary/
 !data/processed/.gitkeep
 *.lock

@@ -1,18 +1,4 @@
-const configuredBaseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-export const API_BASE_URL = configuredBaseUrl.replace(/\/+$/, "");
-const ADMIN_KEY_STORAGE = "evidence-atlas-admin-key";
-
-export function getAdminKey() {
-  try { return sessionStorage.getItem(ADMIN_KEY_STORAGE) || ""; } catch { return ""; }
-}
-
-export function setAdminKey(value) {
-  try { sessionStorage.setItem(ADMIN_KEY_STORAGE, value); } catch { /* private mode */ }
-}
-
-export function clearAdminKey() {
-  try { sessionStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* private mode */ }
-}
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/+$/, "");
 
 export class ApiError extends Error {
   constructor(message, status = 0, details = null) {
@@ -23,105 +9,65 @@ export class ApiError extends Error {
   }
 }
 
+function csrfToken() {
+  return document.cookie.split("; ").find((part) => part.startsWith("evidence_csrf="))?.split("=").slice(1).join("=") || "";
+}
+
 async function request(path, options = {}) {
   let response;
   try {
+    const method = options.method || "GET";
     response = await fetch(API_BASE_URL + path, {
       ...options,
+      credentials: "same-origin",
       headers: {
         Accept: "application/json",
         ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...(getAdminKey() ? { "X-Admin-Key": getAdminKey() } : {}),
+        ...(method !== "GET" && path !== "/auth/login" ? { "X-CSRF-Token": csrfToken() } : {}),
         ...options.headers,
       },
     });
   } catch (error) {
-    throw new ApiError(
-      "The research API could not be reached. Check that the backend is running and VITE_API_URL is correct.",
-      0,
-      error,
-    );
+    throw new ApiError("The research service could not be reached. Please try again shortly.", 0, error);
   }
-
   const contentType = response.headers.get("content-type") || "";
-  let payload = null;
-  if (contentType.includes("application/json")) {
-    payload = await response.json().catch(() => null);
-  } else {
-    payload = await response.text().catch(() => "");
-  }
-
+  const payload = contentType.includes("application/json")
+    ? await response.json().catch(() => null)
+    : await response.text().catch(() => "");
   if (!response.ok) {
-    const detail = payload && typeof payload === "object"
-      ? payload.detail || payload.message
-      : payload;
-    throw new ApiError(
-      typeof detail === "string" && detail.trim()
-        ? detail
-        : "The research API returned an error (" + response.status + ").",
-      response.status,
-      payload,
-    );
+    if (response.status === 401 && path !== "/auth/login" && path !== "/auth/me") {
+      window.dispatchEvent(new Event("evidence-session-expired"));
+    }
+    const detail = typeof payload === "object" && payload ? payload.detail || payload.message : payload;
+    throw new ApiError(typeof detail === "string" && detail.trim() ? detail : `Request failed (${response.status}).`, response.status, payload);
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new ApiError("The research API returned an unexpected response format.", response.status, payload);
+    throw new ApiError("The research service returned an unexpected response.", response.status, payload);
   }
   return payload;
 }
 
-export function verifyAdmin() {
-  return request("/admin/verify", { method: "POST" });
-}
+export const getHealth = () => request("/health");
+export const getSession = () => request("/auth/me");
+export const login = (username, password) => request("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
+export const logout = () => request("/auth/logout", { method: "POST" });
+export const changePassword = (current_password, new_password) => request("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });
+export const getPaper = (pmid) => request("/paper/" + encodeURIComponent(pmid));
 
-export function getHealth() {
-  return request("/health");
-}
-
-export function analyzeQuery(query) {
-  return request("/analyze-query", {
-    method: "POST",
-    body: JSON.stringify({ query }),
-  });
-}
-
-export function runResearch({ query, yearMin, yearMax, studyTypes, maxLoops = 2 }) {
-  const body = {
-    query,
-    max_loops: maxLoops,
-  };
-  if (yearMin) body.year_min = Number(yearMin);
-  if (yearMax) body.year_max = Number(yearMax);
-  if (studyTypes.length) body.study_types = studyTypes;
-  return request("/research", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export function getPaper(pmid) {
-  return request("/paper/" + encodeURIComponent(pmid));
-}
-
-export function getTraceUrl(auditTraceUrl, requestId) {
-  const fallback = "/trace/" + encodeURIComponent(requestId);
-  if (!auditTraceUrl) return fallback;
-
-  try {
-    const url = new URL(auditTraceUrl, API_BASE_URL + "/");
-    const base = new URL(API_BASE_URL + "/");
-    if (url.origin !== base.origin) {
-      throw new ApiError("The API returned a trace URL outside the configured research service.", 0);
-    }
-    return url.pathname + url.search;
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError("The API returned an invalid audit-trace URL.", 0, error);
+export function runResearch({ query, yearMin, yearMax, studyTypes, maxLoops }, isAdmin = false) {
+  const body = { query };
+  if (isAdmin) {
+    if (yearMin) body.year_min = Number(yearMin);
+    if (yearMax) body.year_max = Number(yearMax);
+    if (studyTypes?.length) body.study_types = studyTypes;
+    if (maxLoops) body.max_loops = maxLoops;
   }
+  return request("/research", { method: "POST", body: JSON.stringify(body) });
 }
 
-export function getTrace(auditTraceUrl, requestId) {
-  if (!requestId && !auditTraceUrl) {
-    throw new ApiError("No request identifier or trace URL was returned for this research run.", 0);
-  }
-  return request(getTraceUrl(auditTraceUrl, requestId));
-}
+export const listAudits = (params = {}) => request("/admin/audits?" + new URLSearchParams(params));
+export const getAudit = (id) => request("/admin/audits/" + encodeURIComponent(id));
+export const getObservability = (days = 30) => request("/admin/observability?days=" + days);
+export const listAccounts = (params = {}) => request("/admin/accounts?" + new URLSearchParams(params));
+export const createAccount = (payload) => request("/admin/accounts", { method: "POST", body: JSON.stringify(payload) });
+export const updateAccount = (id, payload) => request("/admin/accounts/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify(payload) });

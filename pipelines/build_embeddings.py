@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 import numpy as np
@@ -27,6 +28,7 @@ from backend.app.retrieval.medcpt import MedCPTArticleEncoder, EMBEDDING_DIM
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("build_embeddings")
+BATCH_ORDER = "approximate_text_length_v1"
 
 
 def compute_file_hash(filepath: Path) -> str:
@@ -73,7 +75,15 @@ def atomic_write_json(path: Path, payload: dict) -> None:
             json.dump(payload, temporary, indent=2)
             temporary.flush()
             os.fsync(temporary.fileno())
-        os.replace(temporary_name, path)
+        for attempt in range(5):
+            try:
+                os.replace(temporary_name, path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                # Windows scanners can briefly hold the existing checkpoint.
+                time.sleep(0.05 * (attempt + 1))
         temporary_name = None
     finally:
         if temporary_name and os.path.exists(temporary_name):
@@ -94,6 +104,10 @@ def resumable_encode(
     from tqdm import tqdm
 
     total_records = len(titles)
+    ordered_indices = sorted(
+        range(total_records),
+        key=lambda index: len(titles[index]) + len(abstracts[index]),
+    )
     in_progress_path = output_path.with_name(f"{output_path.stem}.inprogress.npy")
     completed_records = 0
     embeddings = None
@@ -105,6 +119,7 @@ def resumable_encode(
             valid_checkpoint = (
                 checkpoint.get("corpus_hash") == corpus_hash
                 and checkpoint.get("model_name") == "ncbi/MedCPT-Article-Encoder"
+                and checkpoint.get("batch_order") == BATCH_ORDER
                 and int(checkpoint.get("total_records", -1)) == total_records
                 and tuple(embeddings.shape) == (total_records, EMBEDDING_DIM)
             )
@@ -138,6 +153,7 @@ def resumable_encode(
             {
                 "corpus_hash": corpus_hash,
                 "model_name": "ncbi/MedCPT-Article-Encoder",
+                "batch_order": BATCH_ORDER,
                 "total_records": total_records,
                 "completed_records": 0,
                 "embedding_dimension": EMBEDDING_DIM,
@@ -150,12 +166,13 @@ def resumable_encode(
         batch_number = completed_records // batch_size
         for start in range(completed_records, total_records, batch_size):
             end = min(start + batch_size, total_records)
+            batch_indices = ordered_indices[start:end]
             batch_embeddings = encoder.encode_articles(
-                titles=titles[start:end],
-                abstracts=abstracts[start:end],
+                titles=[titles[index] for index in batch_indices],
+                abstracts=[abstracts[index] for index in batch_indices],
                 show_progress=False,
             )
-            embeddings[start:end] = batch_embeddings
+            embeddings[batch_indices] = batch_embeddings
             progress.update(end - start)
             batch_number += 1
             if batch_number % checkpoint_every == 0 or end == total_records:
@@ -165,6 +182,7 @@ def resumable_encode(
                     {
                         "corpus_hash": corpus_hash,
                         "model_name": "ncbi/MedCPT-Article-Encoder",
+                        "batch_order": BATCH_ORDER,
                         "total_records": total_records,
                         "completed_records": end,
                         "embedding_dimension": EMBEDDING_DIM,
@@ -276,6 +294,7 @@ def build_embeddings(
         "model_name": "ncbi/MedCPT-Article-Encoder",
         "pooling": "cls",
         "normalized": True,
+        "batch_order": BATCH_ORDER if resume else "corpus_order",
         "batch_size": batch_size,
         "device": str(getattr(encoder, "device", "unknown")),
         "is_mock": bool(getattr(encoder, "is_mock", False)),

@@ -18,10 +18,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # LLM / NVIDIA NIM Configuration
-    ADMIN_API_KEY: Optional[SecretStr] = Field(
-        default=None,
-        description="Optional shared key required for administrator-only diagnostic endpoints",
-    )
     NVIDIA_API_KEY: Optional[SecretStr] = Field(default=None, description="NVIDIA API Key")
     NVIDIA_BASE_URL: str = Field(default="https://integrate.api.nvidia.com/v1")
     NVIDIA_MODEL_NAME: str = Field(default="nvidia/nemotron-3-super-120b-a12b")
@@ -40,6 +36,7 @@ class Settings(BaseSettings):
     MESH_GRAPH_PATH: str = Field(default="./data/processed/mesh_graph.gpickle")
     MESH_DICT_PATH: str = Field(default="./data/processed/mesh_dictionary.json")
     INDEX_MANIFEST_PATH: str = Field(default="./data/manifests/index_manifest.json")
+    APP_DATABASE_PATH: str = Field(default="./data/app/evidence_atlas.sqlite3")
 
     # MedCPT Models & Inference
     MEDCPT_QUERY_ENCODER: str = Field(default="ncbi/MedCPT-Query-Encoder")
@@ -97,14 +94,6 @@ class Settings(BaseSettings):
     def get_raw_nvidia_api_key(self) -> Optional[str]:
         """Safely extract plain text NVIDIA API key without logging it."""
         return self.NVIDIA_API_KEY.get_secret_value() if self.NVIDIA_API_KEY else None
-
-    def get_raw_admin_api_key(self) -> Optional[str]:
-        """Return the configured admin key, treating an empty value as disabled."""
-        if self.ADMIN_API_KEY is None:
-            return None
-        value = self.ADMIN_API_KEY.get_secret_value()
-        return value if value.strip() else None
-
 
 @lru_cache()
 def get_settings() -> Settings:

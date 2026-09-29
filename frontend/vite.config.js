@@ -7,5 +7,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    proxy: {
+      "/api": {
+        target: `http://127.0.0.1:${process.env.VITE_BACKEND_PORT || process.env.PORT || "8000"}`,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+    },
   },
 });

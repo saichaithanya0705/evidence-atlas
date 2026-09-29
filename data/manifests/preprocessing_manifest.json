@@ -1,11 +1,11 @@
 {
   "source_file": "data/raw/pubmed_sample.csv",
-  "total_raw_rows": 29995,
-  "clean_records_count": 29939,
+  "total_raw_rows": 30050,
+  "clean_records_count": 29994,
   "dropped_corrupt_or_empty": 0,
   "dropped_duplicate_pmids": 0,
   "dropped_duplicate_content": 56,
   "parquet_path": "data/processed/cleaned_pubmed.parquet",
   "jsonl_path": "data/processed/cleaned_pubmed.jsonl",
-  "timestamp_utc": "2026-09-28T00:33:08.979996+00:00"
+  "timestamp_utc": "2026-09-28T13:24:29.567013+00:00"
 }

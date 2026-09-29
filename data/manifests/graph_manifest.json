@@ -1,10 +1,10 @@
 {
-  "total_nodes": 39312,
-  "paper_nodes": 29939,
+  "total_nodes": 39367,
+  "paper_nodes": 29994,
   "mesh_nodes": 9373,
-  "total_edges": 909879,
-  "mesh_cooccurrence_edges": 524570,
-  "density": 0.0011775365779334134,
+  "total_edges": 909984,
+  "mesh_cooccurrence_edges": 524657,
+  "density": 0.0011743840483857007,
   "pickle_path": "data/processed/mesh_graph.gpickle",
   "json_path": "data/processed/mesh_graph.json"
 }

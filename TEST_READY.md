@@ -1,6 +1,7 @@
 # TEST_READY.md: AI-Powered Medical Research Abstract Finder
 
-**Status**: READY FOR LOCAL MILESTONE VERIFICATION & E2E EXECUTION  
+**Status**: Historical test inventory; current account-aware verification is described in `frontend/tests/README.md` and the latest `pytest` result.
+**Current verification (2026-09-29)**: `pytest -q` — 811 passed, 1 skipped; frontend build and account-aware browser suite passed at 1440, 768, 390, and 320px. Startup preflight correctly rejects the host's unsupported Node 20.18.0, so a supported Node installation is still required before `start.bat` can launch Vite. The counts below describe the earlier milestone only.
 **E2E Test Cases**: 398 passed (0 failed, 0 skipped)  
 **Current Project Suite**: 762 passed in total (756 non-loader tests + 6 isolated MedCPT/index loader tests)  
 **Latest Verification**: 2026-09-26; frontend production build and npm audit also passed  

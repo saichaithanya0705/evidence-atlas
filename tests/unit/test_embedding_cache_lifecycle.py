@@ -94,3 +94,60 @@ def test_resumable_build_continues_after_interrupted_batch(tmp_path, monkeypatch
     assert calls[2][0] == "Title 3"
     assert not (tmp_path / "embeddings_checkpoint.json").exists()
     assert not (tmp_path / "article_embeddings.inprogress.npy").exists()
+
+
+def test_resumable_build_buckets_by_text_length_and_restores_original_order(tmp_path, monkeypatch):
+    corpus = tmp_path / "corpus.csv"
+    pd.DataFrame(
+        [
+            {"pmid": 1, "title": "Title 1", "abstract": "x" * 100},
+            {"pmid": 2, "title": "Title 2", "abstract": "x" * 10},
+            {"pmid": 3, "title": "Title 3", "abstract": "x" * 50},
+            {"pmid": 4, "title": "Title 4", "abstract": "x"},
+        ]
+    ).to_csv(corpus, index=False)
+    calls = []
+
+    class FakeEncoder:
+        def __init__(self, batch_size):
+            self.batch_size = batch_size
+
+        def encode_articles(self, titles, abstracts, show_progress=False):
+            calls.append(list(titles))
+            return np.vstack([
+                np.full(module.EMBEDDING_DIM, float(title.rsplit(" ", 1)[-1]), dtype=np.float32)
+                for title in titles
+            ])
+
+    monkeypatch.setattr(module, "MedCPTArticleEncoder", FakeEncoder)
+
+    module.build_embeddings(
+        corpus,
+        tmp_path,
+        batch_size=2,
+        resume=True,
+        checkpoint_every=1,
+    )
+
+    embeddings = np.load(tmp_path / "article_embeddings.npy")
+    assert calls == [["Title 4", "Title 2"], ["Title 3", "Title 1"]]
+    assert embeddings[:, 0].tolist() == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_checkpoint_write_retries_transient_windows_file_lock(tmp_path, monkeypatch):
+    checkpoint = tmp_path / "embeddings_checkpoint.json"
+    checkpoint.write_text("{}", encoding="utf-8")
+    original_replace = module.os.replace
+    attempts = {"count": 0}
+
+    def occasionally_locked(source, destination):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise PermissionError("transient checkpoint file lock")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", occasionally_locked)
+    module.atomic_write_json(checkpoint, {"completed_records": 2})
+
+    assert attempts["count"] == 2
+    assert json.loads(checkpoint.read_text(encoding="utf-8")) == {"completed_records": 2}

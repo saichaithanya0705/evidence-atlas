@@ -46,7 +46,7 @@ function uncertaintyText(research) {
   return "This evidence summary does not replace review of the original studies or clinical judgment.";
 }
 
-export default function SynthesisPanel({ research, onTraceEvidence, isAdmin }) {
+export default function SynthesisPanel({ research, onTraceEvidence, isAdmin, loading, error }) {
   const synthesis = research?.synthesis || "";
   const paragraphs = synthesis.split(/\n\s*\n/).filter(Boolean);
   const pmids = getCitationPmids(synthesis);
@@ -66,9 +66,19 @@ export default function SynthesisPanel({ research, onTraceEvidence, isAdmin }) {
           </span>
         ) : <span className="subtle-label">Research synthesis</span>}
       </div>
-      {!research ? (
+      {loading ? <div className="synthesis-loading" role="status">
+        <span className="large-spinner" />
+        <h3>Building an evidence-grounded answer</h3>
+        <p>Retrieving sources and reviewing their findings. This may take a little time.</p>
+        <div className="reading-skeleton" aria-hidden="true"><i /><i /><i /></div>
+      </div> : error ? <div className="synthesis-empty"><h3>Let’s try that again</h3><p>No synthesis was produced. Review the message above and retry your question.</p></div> : !research ? (
         <div className="synthesis-empty">
-          <p>Your evidence-grounded synthesis will appear here after a search.</p>
+          <h3>From question to understanding</h3>
+          <ol className="research-steps">
+            <li><strong>Ask a focused question</strong><p>Start with a population, treatment, or outcome you want to explore.</p></li>
+            <li><strong>Compare the sources</strong><p>Explore ranked abstracts and the studies behind the synthesis.</p></li>
+            <li><strong>Read with context</strong><p>Check original findings, study designs, and limitations before drawing conclusions.</p></li>
+          </ol>
         </div>
       ) : (
         <>
