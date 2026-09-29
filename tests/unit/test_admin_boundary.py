@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.app import main
 from backend.app.auth.security import hash_password
 from backend.app.core.config import get_settings
-from backend.app.models.request_response import ResearchResponse, RetrievalCandidate
+from backend.app.models.request_response import EvidenceRecord, ResearchResponse, RetrievalCandidate
 from backend.app.storage.accounts import AccountStore
 from backend.app.storage.database import initialize_db
 
@@ -70,7 +70,7 @@ def test_reader_research_excludes_diagnostics(client, monkeypatch):
 
     class FakeResearchService:
         def research(self, query, filters, max_loops, request_id, event_sink=None):
-            return ResearchResponse(request_id=request_id, query=query, canonical_query="diabetes mellitus", route="SIMPLE", synthesis="A grounded result [PMID: 12345].", evidence_table=[], cited_pmids=["12345"], citations_valid=True, citation_precision=1.0, consensus_level="consensus", evidence_gaps=["  Missing   safety evidence  "], audit_trace_url=f"/trace/{request_id}", retrieved_papers=[candidate])
+            return ResearchResponse(request_id=request_id, query=query, canonical_query="diabetes mellitus", route="SIMPLE", synthesis="A grounded result [PMID: 12345].", evidence_table=[EvidenceRecord(pmid="12345", title="Example study", key_findings="Grounded finding", supporting_text_spans=["Exact abstract span"])], cited_pmids=["12345"], citations_valid=True, citation_precision=1.0, consensus_level="consensus", evidence_gaps=["  Missing   safety evidence  "], audit_trace_url=f"/trace/{request_id}", retrieved_papers=[candidate])
 
         def get_trace(self, request_id):
             return {"request_id": request_id, "stages": []}
@@ -84,5 +84,5 @@ def test_reader_research_excludes_diagnostics(client, monkeypatch):
     for field in ("audit_trace_url", "canonical_query", "route", "citation_precision", "consensus_level"):
         assert field not in body
     assert body["evidence_gaps"] == ["Missing safety evidence"]
-    assert body["evidence_table"] == []
+    assert body["evidence_table"][0]["supporting_text_spans"] == ["Exact abstract span"]
     assert "channel_scores" not in body["retrieved_papers"][0]

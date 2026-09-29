@@ -26,6 +26,8 @@ from backend.app.services.telemetry import telemetry
 from backend.app.auth.routes import router as auth_router
 from backend.app.auth.security import get_current_account, require_admin, require_admin_csrf, require_ready_account, require_ready_csrf
 from backend.app.admin.routes import router as admin_router
+from backend.app.conversation.routes import router as conversation_router
+from backend.app.conversation.service import public_research_projection
 from backend.app.storage.audits import AuditStore
 from backend.app.storage.database import initialize_db
 
@@ -46,6 +48,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(conversation_router)
 
 
 @app.on_event("startup")
@@ -68,16 +71,8 @@ def _public_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _public_research_response(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return only ordinary-user synthesis content, never diagnostics."""
-    allowed = {
-        "request_id", "query", "synthesis", "cited_pmids", "evidence_gaps",
-    }
-    result = {key: value for key, value in payload.items() if key in allowed}
-    result["evidence_table"] = []
-    result["retrieved_papers"] = [
-        _public_candidate(item) for item in payload.get("retrieved_papers", [])
-    ]
-    return result
+    """Keep safe synthesis, exact evidence rows, and public paper metadata."""
+    return public_research_projection(payload)
 
 
 def _get_research_service():

@@ -1,0 +1,138 @@
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.app import main
+from backend.app.auth.security import hash_password
+from backend.app.core.config import get_settings
+from backend.app.storage.accounts import AccountStore
+from backend.app.storage.conversations import ConversationStore
+from backend.app.storage.database import connect_db, initialize_db
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    path = tmp_path / "routes.sqlite3"
+    monkeypatch.setenv("APP_DATABASE_PATH", str(path))
+    get_settings.cache_clear()
+    initialize_db(path)
+    AccountStore(path).create("reader", "Reader", "user", hash_password("reader-password-123"), None, False)
+    AccountStore(path).create("other", "Other", "user", hash_password("other-password-123"), None, False)
+    with TestClient(main.app, base_url="http://testserver") as value:
+        yield value
+    get_settings.cache_clear()
+
+
+def _headers(client):
+    response = client.post("/auth/login", json={"username": "reader", "password": "reader-password-123"}, headers={"Origin": "http://testserver"})
+    assert response.status_code == 200
+    return {"Origin": "http://testserver", "X-CSRF-Token": client.cookies.get("evidence_csrf")}
+
+
+def test_conversation_routes_are_registered_and_require_session(client):
+    for method, path in (("post", "/conversations"), ("get", "/conversations"), ("get", "/conversations/missing"), ("post", "/conversations/missing/turns")):
+        response = client.post(path, json={}) if method == "post" else client.get(path)
+        assert response.status_code == 401
+
+
+def test_conversation_reads_reject_expired_and_deactivated_sessions(client):
+    _headers(client)
+    path = get_settings().APP_DATABASE_PATH
+    with connect_db(path) as db:
+        db.execute("UPDATE sessions SET expires_at='2000-01-01T00:00:00+00:00'")
+    assert client.get("/conversations").status_code == 401
+
+    _headers(client)
+    account = AccountStore(path).by_username("reader")
+    AccountStore(path).update(account["id"], account["id"], active=False)
+    assert client.get("/conversations").status_code == 401
+
+
+def test_create_list_detail_and_owned_turn_routes(client):
+    headers = _headers(client)
+    created = client.post("/conversations", json={}, headers=headers)
+    assert created.status_code == 201
+    conversation_id = created.json()["conversation_id"]
+    assert client.get("/conversations?limit=10&offset=0", headers=headers).json()["total"] == 1
+    assert client.get(f"/conversations/{conversation_id}", headers=headers).status_code == 200
+    assert client.get("/conversations/not-owned", headers=headers).status_code == 404
+    assert client.get("/conversations?limit=101", headers=headers).status_code == 422
+
+
+def test_turn_post_rejects_missing_csrf_and_advanced_user_controls(client):
+    headers = _headers(client)
+    conversation_id = client.post("/conversations", json={}, headers=headers).json()["conversation_id"]
+    no_csrf = {"Origin": "http://testserver"}
+    assert client.post("/conversations", json={}, headers=no_csrf).status_code == 403
+    assert client.post(f"/conversations/{conversation_id}/turns", json={"message": "diabetes"}, headers=no_csrf).status_code == 403
+    assert client.post(f"/conversations/{conversation_id}/turns", json={"message": "diabetes", "max_loops": 9}, headers=headers).status_code == 422
+
+
+def test_foreign_conversation_is_hidden_as_not_found(client):
+    other_login = client.post("/auth/login", json={"username": "other", "password": "other-password-123"}, headers={"Origin": "http://testserver"})
+    assert other_login.status_code == 200
+    other_headers = {"Origin": "http://testserver", "X-CSRF-Token": client.cookies.get("evidence_csrf")}
+    foreign_id = client.post("/conversations", json={}, headers=other_headers).json()["conversation_id"]
+    reader_headers = _headers(client)
+
+    assert client.get(f"/conversations/{foreign_id}", headers=reader_headers).status_code == 404
+    assert client.post(f"/conversations/{foreign_id}/turns", json={"message": "diabetes"}, headers=reader_headers).status_code == 404
+
+
+def test_turn_route_returns_the_completed_public_response(client):
+    from backend.app.conversation.models import ConversationAgentDecision
+    from backend.app.conversation.routes import get_conversation_service
+    from backend.app.conversation.service import ConversationService
+    from backend.app.models.request_response import AgentAction
+    from backend.app.storage.audits import AuditStore
+
+    headers = _headers(client)
+    conversation_id = client.post("/conversations", json={}, headers=headers).json()["conversation_id"]
+    path = get_settings().APP_DATABASE_PATH
+    class FakeAgent:
+        def plan_turn(self, message, history):
+            return ConversationAgentDecision(
+                action=AgentAction.CLARIFY, decision_summary="A specific outcome is needed.",
+                message="Please name the outcome.",
+            )
+
+    class NoResearch:
+        pass
+
+    service = ConversationService(
+        store=ConversationStore(path), audit=AuditStore(path), agent=FakeAgent(), research=NoResearch(),
+    )
+    client.app.dependency_overrides[get_conversation_service] = lambda: service
+    try:
+        response = client.post(
+            f"/conversations/{conversation_id}/turns", json={"message": "What about it?"}, headers=headers,
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_conversation_service, None)
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "CLARIFY"
+    assert response.json()["assistant_message"] == "Please name the outcome."
+
+
+def test_running_turn_is_reported_as_conflict_without_second_storage_record(client):
+    from backend.app.conversation.routes import get_conversation_service
+    from backend.app.storage.audits import AuditStore
+
+    headers = _headers(client)
+    conversation_id = client.post("/conversations", json={}, headers=headers).json()["conversation_id"]
+    path = get_settings().APP_DATABASE_PATH
+    account = AccountStore(path).by_username("reader")
+    store = ConversationStore(path)
+    store.begin_turn(conversation_id, account["id"], "already running", turn_id="running-turn")
+    service = type("Injected", (), {"run_turn": lambda self, *args: store.begin_turn(conversation_id, account["id"], "second", turn_id="second-turn")})()
+    client.app.dependency_overrides[get_conversation_service] = lambda: service
+    try:
+        response = client.post(f"/conversations/{conversation_id}/turns", json={"message": "second"}, headers=headers)
+    finally:
+        client.app.dependency_overrides.pop(get_conversation_service, None)
+
+    assert response.status_code == 409
+    detail = store.detail_for_account(conversation_id, account["id"])
+    assert detail["total_turns"] == 1
+    with connect_db(path) as db:
+        assert db.execute("SELECT COUNT(*) FROM query_runs").fetchone()[0] == 0
