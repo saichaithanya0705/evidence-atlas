@@ -204,6 +204,47 @@ dialog.paper-drawer[open] { display: flex; flex-direction: column; }
 .diagnostics-disclosure :is(.interpreted-query p, .pico-row, .concepts-row, .route-summary p, .audit-section ol, .audit-iteration, .audit-summary-field strong, .audit-muted, .audit-empty) { font-size: 13px; line-height: 1.7; }
 .diagnostics-disclosure :is(.interpreted-query h3, .pico-list h3, .route-summary h3, .audit-section h3, .audit-summary-field span) { font-size: 12px; }
 .diagnostics-disclosure :is(.audit-iteration pre, .audit-raw-details pre) { font-size: 12px; }
+.conversation-workspace { max-width: 1120px; }
+.conversation-header { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 36px 0 24px; border-bottom: 1px solid var(--line); }
+.conversation-header h1 { margin: 8px 0; color: var(--ink); font: 400 clamp(32px, 4vw, 48px)/1.15 Georgia, serif; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.conversation-header p { margin: 0; color: var(--muted); }
+.conversation-header-actions, .conversation-list-heading, .composer-actions { display: flex; align-items: center; gap: 10px; }
+.conversation-header-actions button, .conversation-list-heading button, .conversation-list-items button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 5px; color: var(--blue); background: transparent; }
+.conversation-list { margin: 18px 0; padding: 18px 20px; }
+.conversation-list-heading { justify-content: space-between; }
+.conversation-list-heading h2 { margin: 0; font: 400 21px/1.3 Georgia, serif; }
+.conversation-list-items { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.conversation-list-items button[aria-current="page"] { background: var(--wash); border-color: #8eaaa0; color: var(--ink); }
+.conversation-history { display: grid; gap: 18px; padding: 24px 0; }
+.conversation-turn { display: grid; gap: 10px; }
+.conversation-message { padding: 20px 22px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.conversation-user { margin-left: min(12%, 120px); background: #f0f4ef; }
+.conversation-assistant { margin-right: min(8%, 80px); border-left: 3px solid var(--blue); }
+.conversation-message-heading { display: flex; align-items: baseline; gap: 12px; color: var(--muted); font-size: 12px; }
+.conversation-message p { margin: 10px 0 0; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
+.conversation-message .answer-status { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .05em; }
+.conversation-message .answer-status.failed { color: #8a3f31; }
+.conversation-message .answer-status.insufficient { color: #79551d; }
+.conversation-message .message-context { color: var(--muted); font-size: 13px; }
+.citation-button { appearance: none; border: 0; cursor: pointer; }
+.message-papers { margin-top: 20px; }
+.message-papers .ranked-panel { border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; }
+.message-papers .ranked-panel .panel-heading { margin: 0; min-height: 48px; padding: 10px 0; }
+.message-papers .ranked-panel .paper-row { padding: 16px 0; }
+.message-papers > p { color: var(--muted); font-size: 12px; }
+.conversation-progress { display: flex; align-items: flex-start; gap: 12px; padding: 18px 22px; margin-right: min(8%, 80px); color: var(--muted); border-left: 3px solid #8eaaa0; background: #f0f4ef; }
+.conversation-progress .large-spinner { flex: 0 0 auto; }
+.conversation-progress strong { color: var(--ink); }
+.conversation-progress p { margin: 0; }
+.conversation-composer { display: grid; gap: 10px; padding: 16px; }
+.conversation-composer label { color: var(--ink); font-weight: 600; }
+.conversation-composer textarea { width: 100%; min-height: 92px; resize: vertical; padding: 12px; border: 1px solid #cbd4cd; border-radius: 5px; background: var(--paper); color: var(--ink); font: inherit; }
+.composer-actions { justify-content: space-between; color: var(--muted); font-size: 12px; }
+.composer-actions .research-button { height: 42px; }
+.conversation-empty, .conversation-error, .research-disclaimer { color: var(--muted); }
+.research-disclaimer { padding-top: 18px; border-top: 1px solid var(--line); font-size: 12px; }
+.message-papers .paper-row-links a { display: none; }
+.message-papers .paper-row-links button { min-height: 34px; padding: 5px 0; border: 0; color: var(--blue); background: transparent; text-align: left; text-decoration: underline; }
 /* Diagnostic tables intentionally scroll inside their panels, never the page. */
 .table-scroll { max-width: 100%; overflow-x: auto; }.evidence-table th { font-size: 12px; }.evidence-table td { font-size: 13px; line-height: 1.6; }
 @media (max-width: 1100px) {
@@ -242,6 +283,10 @@ dialog.paper-drawer[open] { display: flex; flex-direction: column; }
   .drawer-scroll { padding: 22px 20px; }.drawer-paper-title { font-size: 26px; }.drawer-abstract { font-size: 15px; }.drawer-tabs button { padding: 10px 6px; font-size: 12px; }
   .status-notice { flex-wrap: wrap; }.admin-dialog { padding: 24px; }.admin-dialog-actions { flex-wrap: wrap; }
   .research-footer { font-size: 11px; }.research-footer > span { display: none; }
+  .conversation-header { align-items: start; flex-direction: column; padding-top: 26px; }
+  .conversation-header-actions { width: 100%; }.conversation-header-actions button { flex: 1; }
+  .conversation-user, .conversation-assistant, .conversation-progress { margin-right: 0; margin-left: 0; }
+  .conversation-message { padding: 16px; }.composer-actions { align-items: stretch; flex-direction: column; }.composer-actions .research-button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

@@ -1,7 +1,7 @@
 import Icon from "./Icon.jsx";
 import { getCitationPmids, pubmedUrl } from "../utils.js";
 
-function renderCitations(text, onEvidence) {
+export function renderCitations(text, onEvidence) {
   const parts = [];
   const pattern = /\[?PMID:\s*(\d+)\]?/gi;
   let previousEnd = 0;
@@ -10,16 +10,7 @@ function renderCitations(text, onEvidence) {
     if (match.index > previousEnd) parts.push(text.slice(previousEnd, match.index));
     const pmid = match[1];
     parts.push(
-      <a
-        className="citation-link"
-        href={pubmedUrl(pmid)}
-        target="_blank"
-        rel="noreferrer"
-        key={match.index}
-        onClick={onEvidence ? () => onEvidence([pmid]) : undefined}
-      >
-        PMID: {pmid}
-      </a>,
+      onEvidence ? <button className="citation-link citation-button" type="button" key={match.index} onClick={() => onEvidence([pmid])}>PMID: {pmid}</button> : <a className="citation-link" href={pubmedUrl(pmid)} target="_blank" rel="noreferrer" key={match.index}>PMID: {pmid}</a>,
     );
     previousEnd = pattern.lastIndex;
   }

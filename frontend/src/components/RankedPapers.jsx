@@ -1,7 +1,7 @@
 import Icon from "./Icon.jsx";
 import { formatValue, pubmedUrl } from "../utils.js";
 
-function PaperRow({ paper, index, selected, onSelect, isAdmin }) {
+function PaperRow({ paper, index, selected, onSelect, onSourceSelect, isAdmin }) {
   const authors = paper.authors || [];
   const authorsText = authors.length > 3
     ? authors.slice(0, 3).join(", ") + " et al."
@@ -31,9 +31,7 @@ function PaperRow({ paper, index, selected, onSelect, isAdmin }) {
           <p className="paper-mesh"><strong>MeSH</strong> {mesh.slice(0, 4).join(" · ")}</p>
         )}
         <div className="paper-row-links">
-          <a href={pubmedUrl(paper.pmid)} target="_blank" rel="noreferrer">
-            PMID: {paper.pmid} <Icon name="external" size={13} />
-          </a>
+          {onSourceSelect ? <button type="button" onClick={() => onSourceSelect(paper)}>PMID: {paper.pmid}</button> : <a href={pubmedUrl(paper.pmid)} target="_blank" rel="noreferrer">PMID: {paper.pmid} <Icon name="external" size={13} /></a>}
           {isAdmin && <button type="button" onClick={() => onSelect(paper)}>Why this paper?</button>}
         </div>
       </div>
@@ -46,6 +44,7 @@ export default function RankedPapers({
   total,
   selectedPmid,
   onSelect,
+  onSourceSelect,
   loading,
   hasSearched,
   isAdmin,
@@ -78,6 +77,7 @@ export default function RankedPapers({
               index={index}
               selected={paper.pmid === selectedPmid}
               onSelect={onSelect}
+              onSourceSelect={onSourceSelect}
               isAdmin={isAdmin}
             />
           ))
