@@ -19,6 +19,7 @@ let heldTurnReady = Promise.resolve();
 let announceHeldTurn = () => {};
 let lastTurnBody = null;
 const conversations = new Map();
+const auditRows = [];
 
 function turn(status, message) {
   const labels = { SUPPORTED: 'SUPPORTED', LIMITED: 'LIMITED', INSUFFICIENT: 'INSUFFICIENT', FAILED: 'FAILED' };
@@ -62,8 +63,15 @@ await page.route('**/api/**', async route => {
     result.conversation_id = id;
     if (record.turns.length === 0) record.conversation.title = body.message.slice(0, 80);
     record.turns.push({ turn_id: result.turn_id, sequence: record.turns.length + 1, user_message: body.message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', public_response: { cited_pmids: result.cited_pmids, evidence_table: result.evidence_table, retrieved_papers: result.retrieved_papers, evidence_gaps: result.evidence_gaps, consensus_level: result.consensus_level } });
+    if (session?.role === 'admin') auditRows.unshift({ id: result.request_id, query: body.message, username: session.username, role: session.role, operation: 'conversation_turn', status: 'completed', answer_status: result.answer_status, conversation_id: id, turn_id: result.turn_id, started_at: '2026-09-29T12:00:00Z', duration_ms: 12 });
     data = result;
     }
+  } else if (url.pathname === '/api/admin/audits' && request.method() === 'GET') {
+    data = { items: auditRows, total: auditRows.length };
+  } else if (/\/api\/admin\/audits\/[^/]+$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const item = auditRows.find(row => row.id === id) || auditRows[0];
+    data = { ...item, error: null, response: { synthesis: 'SUPPORTED response for admin controlled question. [PMID: 12345]', cited_pmids: ['12345'], evidence_table: [{ pmid: '12345', supporting_text_spans: ['Supporting span for admin controlled question'] }], retrieved_papers: [{ pmid: '12345', title: 'Illustrative research record' }] }, trace: { citation_audit: { valid: true, cited_pmids: ['12345'] }, timings_ms: { total: 12 } }, events: [{ stage: 'agent_decision', payload: { action: 'RESEARCH', complexity_hint: 'SIMPLE' } }, { stage: 'answer_released', payload: { status: 'SUPPORTED', claim_count: 1 } }] };
   } else if (/\/api\/conversations\/[^/]+$/.test(url.pathname)) {
     const id = url.pathname.split('/').pop();
     const record = conversations.get(id);
@@ -280,6 +288,14 @@ try {
   await page.keyboard.press('Enter');
   await page.getByText('SUPPORTED response for admin controlled question.').waitFor();
   assert.deepEqual(lastTurnBody, { message: 'admin controlled question', year_min: 2020, year_max: 2024, study_types: ['Review'], max_loops: 4 });
+  await page.getByRole('link', { name: 'Audit logs' }).click();
+  await page.getByRole('cell', { name: 'admin controlled question' }).waitFor();
+  await page.getByRole('link', { name: 'View trace' }).click();
+  await page.getByRole('heading', { name: 'Query trace' }).waitFor();
+  await page.getByText(/Conversation phase timeline/i).waitFor();
+  await page.getByText('admin controlled question', { exact: true }).first().waitFor();
+  await page.getByRole('link', { name: 'Research', exact: true }).click();
+  await page.getByRole('heading', { name: /Research conversations/i }).waitFor();
 
   expireNextList = true;
   await page.reload();

@@ -307,6 +307,16 @@ class QueryAnalysisService:
         Returns:
             Tuple of (QueryPlan, Optional[DualQueryEmbeddings]).
         """
+        valid_routes = {"SIMPLE", "MODERATE", "COMPLEX"}
+        agent_complexity_hint = (
+            str(agent_complexity_hint).strip().upper()
+            if agent_complexity_hint is not None else None
+        )
+        route_floor = str(route_floor).strip().upper() if route_floor is not None else None
+        if agent_complexity_hint not in valid_routes:
+            agent_complexity_hint = None
+        if route_floor not in valid_routes:
+            route_floor = None
         filter_input = explicit_filters if explicit_filters is not None else user_filters
         # This structured result is both the public enhancement output and the
         # complete snapshot consumed by plan assembly and routing.

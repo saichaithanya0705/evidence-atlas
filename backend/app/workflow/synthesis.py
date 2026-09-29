@@ -11,6 +11,7 @@ from time import perf_counter
 
 from backend.app.models.request_response import EvidenceRecord
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
+from backend.app.core.nim_client import create_nim_client
 
 logger = logging.getLogger(__name__)
 
@@ -250,14 +251,7 @@ class EvidenceSynthesizer:
         if str(settings.LLM_MODE).casefold() != "nim" or not settings.get_raw_nvidia_api_key():
             return None
         try:
-            from openai import OpenAI
-
-            self.client = OpenAI(
-                base_url=settings.NVIDIA_BASE_URL,
-                api_key=settings.get_raw_nvidia_api_key(),
-                timeout=settings.LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
+            self.client = create_nim_client(settings)
             return self.client
         except Exception as exc:
             logger.warning("Unable to initialize optional NVIDIA NIM synthesis: %s", exc)

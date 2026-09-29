@@ -14,6 +14,7 @@ from typing_extensions import Literal
 from backend.app.models.request_response import RetrievalCandidate
 from backend.app.query.models import QueryPlan
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
+from backend.app.core.nim_client import create_nim_client
 
 logger = logging.getLogger(__name__)
 
@@ -131,14 +132,7 @@ class EvidenceSufficiencyJudge:
         if str(settings.LLM_MODE).casefold() != "nim" or not settings.get_raw_nvidia_api_key():
             return None
         try:
-            from openai import OpenAI
-
-            return OpenAI(
-                base_url=settings.NVIDIA_BASE_URL,
-                api_key=settings.get_raw_nvidia_api_key(),
-                timeout=settings.LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
+            return create_nim_client(settings)
         except Exception as exc:
             logger.warning("Unable to initialize optional NIM evidence judge: %s", exc)
             return None

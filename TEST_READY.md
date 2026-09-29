@@ -1,7 +1,7 @@
 # TEST_READY.md: AI-Powered Medical Research Abstract Finder
 
 **Status**: Historical test inventory; current account-aware verification is described in `frontend/tests/README.md` and the latest `pytest` result.
-**Current verification (2026-09-29)**: `pytest -q` — 811 passed, 1 skipped; frontend build and account-aware browser suite passed at 1440, 768, 390, and 320px. Startup preflight correctly rejects the host's unsupported Node 20.18.0, so a supported Node installation is still required before `start.bat` can launch Vite. The counts below describe the earlier milestone only.
+**Current verification (2026-09-29, Task 11)**: With process-scoped `LLM_MODE=mock` and empty `NVIDIA_API_KEY`, full backend suite: 968 passed, 4 failed, 1 skipped. The only failures are the four empirical Qdrant storage checks listed below that cannot acquire `data/qdrant_storage/.lock` while the existing backend owns it. The NIM TLS recursion was fixed with an explicit certifi-backed shared transport; bounded live planner and synthesis checks returned provider-backed results. Standalone verifier requests were intermittent: one supported verdict succeeded and later calls got NIM `InternalServerError` and failed closed. Conversation, preview, and account browser checks passed; Vite production build passed with the installed Node 20.18.0 compatibility warning (Vite requires 20.19+ or 22.12+). The historical inventory below describes earlier milestones.
 **E2E Test Cases**: 398 passed (0 failed, 0 skipped)  
 **Current Project Suite**: 762 passed in total (756 non-loader tests + 6 isolated MedCPT/index loader tests)  
 **Latest Verification**: 2026-09-26; frontend production build and npm audit also passed  
@@ -82,3 +82,31 @@ python -m pytest tests/e2e/test_tier4_scenarios.py -v --tb=short
   Deterministic mocks for query analysis, PICO extraction, router classification, CRAG sufficiency grades, and syntheses for Scenarios S1–S5 and adversarial edge cases.
 - **`tests/e2e/e2e_contracts.py`**:
   Strict Pydantic contract models (`PICOModel`, `QueryPlan`, `RetrievalCandidate`, `EvidenceRecord`, `ResearchResponse`) and reference invariant evaluation functions.
+
+## Conversational research: deterministic verification
+
+The conversation agent is a biomedical literature interface, not medical advice or a clinical decision system. Its query path is conversation agent → query enhancer → guarded router → research workflow. Enhancement runs for initial and corrective queries. Route complexity is `max(deterministic rule, valid agent hint, prior route floor)`. Claims are released only with a retrieved PMID and exact supporting abstract span; a `LIMITED` response contains only the independently supported portion. `INSUFFICIENT` means no claim passed release checks, and `FAILED` denotes a technical failure.
+
+History, message, title, provider request time, model output, and correction loops are bounded by `CONVERSATION_HISTORY_TURN_LIMIT` (12), `CONVERSATION_MESSAGE_MAX_CHARS` (4000), `CONVERSATION_TITLE_MAX_CHARS` (80), `LLM_TIMEOUT_SECONDS` (30 seconds per provider request), `AGENT_OUTPUT_MAX_TOKENS` (800), and `MAX_CORRECTIVE_LOOPS` (2). A conversation permits one running turn; a duplicate is rejected with 409. Conversations and bounded linked administrator audit summaries are durable in the application SQLite database until operators archive or remove that database. Audits do not retain prompts, raw provider output, or chain-of-thought. Public responses omit internal scores and diagnostics.
+
+`LLM_MODE=mock` is deterministic offline fallback behavior and is not live planner or semantic-grader intelligence. A configured live check requires `LLM_MODE=nim` and a nonempty valid `NVIDIA_API_KEY`. Real-index checks are also separate from deterministic checks and require exclusive Qdrant access. Neither optional check changes the PubMed corpus or index.
+
+Run the safe fixture evaluator and focused checks from the project root:
+
+```powershell
+python scripts/evaluate_conversational_research.py tests/fixtures/conversational_research_report.json
+python -m pytest tests/adversarial/test_conversational_research_guardrails.py tests/unit/test_conversational_research_evaluation.py -q
+```
+
+The fixture evaluator accepts a JSON report object and never reads the live corpus. It reports deterministic route accuracy, correction-loop count, answer-status and abstention distribution, unsupported released-claim rate, citation validity, claim attribution, latency, and LLM-call count. Optional LLM-as-judge and RAGAS-style values are secondary evidence and cannot override these checks.
+
+Run all deterministic browser checks from `frontend/`:
+
+```powershell
+npm run test:ui-conversations
+npm run test:ui-preview
+npm run test:ui-accounts
+npm run build
+```
+
+The conversation browser fixture covers creation, initial and follow-up messages, limited and insufficient rendering, unique PMID tabs with turn-specific spans, collapse/reopen, reload, and linked administrator audit navigation. It does not exercise live provider intelligence. See `frontend/tests/README.md` for the separate backend-backed stress suite.

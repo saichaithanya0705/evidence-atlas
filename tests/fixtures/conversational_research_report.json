@@ -1,0 +1,50 @@
+{
+  "fixtures": [
+    {
+      "name": "supported-comparison",
+      "expected_route": "COMPLEX",
+      "actual_route": "COMPLEX",
+      "correction_queries": ["aspirin cardiovascular outcomes by population"],
+      "answer_status": "SUPPORTED",
+      "citations_valid": true,
+      "latency_ms": 184,
+      "llm_call_count": 2,
+      "claims": [
+        {
+          "released": true,
+          "supported": true,
+          "attributions": [{"pmid": "12345", "exact_span": "Fixture source span, preserved verbatim."}]
+        }
+      ]
+    },
+    {
+      "name": "limited-independent-claim",
+      "expected_route": "MODERATE",
+      "actual_route": "MODERATE",
+      "correction_queries": ["population subgroup outcome"],
+      "answer_status": "LIMITED",
+      "citations_valid": true,
+      "latency_ms": 231,
+      "llm_call_count": 2,
+      "claims": [
+        {
+          "released": true,
+          "supported": true,
+          "attributions": [{"pmid": "67890", "exact_span": "Another exact fixture span."}]
+        }
+      ]
+    },
+    {
+      "name": "insufficient-evidence",
+      "expected_route": "SIMPLE",
+      "actual_route": "SIMPLE",
+      "correction_queries": [],
+      "answer_status": "INSUFFICIENT",
+      "citations_valid": true,
+      "latency_ms": 70,
+      "llm_call_count": 0,
+      "claims": []
+    }
+  ],
+  "optional_signals": {}
+}

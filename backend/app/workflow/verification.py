@@ -9,6 +9,7 @@ from typing import Any, Callable, List, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.app.models.request_response import ClaimVerification, EvidenceRecord
+from backend.app.core.nim_client import create_nim_client
 from backend.app.workflow.synthesis import ClaimToSpanValidator, _claims, _PMID_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -46,14 +47,7 @@ class SemanticClaimVerifier:
         if str(getattr(settings, "LLM_MODE", "")).casefold() != "nim" or not hasattr(settings, "get_raw_nvidia_api_key") or not settings.get_raw_nvidia_api_key():
             return None
         try:
-            from openai import OpenAI
-
-            self.client = OpenAI(
-                base_url=settings.NVIDIA_BASE_URL,
-                api_key=settings.get_raw_nvidia_api_key(),
-                timeout=settings.LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
+            self.client = create_nim_client(settings)
             return self.client
         except Exception as exc:
             logger.warning("Unable to initialize optional NIM semantic verifier: %s", exc)

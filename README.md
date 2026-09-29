@@ -40,6 +40,35 @@ Keep the key in `.env`; do not commit it. `.env` is excluded from Git. The key i
 
 The NIM path uses a bounded, non-reasoning model call to select exact supporting spans; the server validates the returned PMID/span indices and renders cited text from the stored evidence. Invalid selections or provider failures fall back to deterministic source spans. `LLM_SYNTHESIS_MAX_TOKENS` bounds the selection call (default 300); an empty evidence set never calls NIM.
 
+## Conversational biomedical research
+
+The conversation agent resolves a follow-up from bounded conversation history, then sends every initial or corrective research query through the query enhancer, guarded router, and research workflow. Agent complexity is advisory: the executed route is the highest of the deterministic rule route, a valid agent hint, and any carried route floor. The biomedical source corpus, indexes, and Qdrant collection are never changed by conversation turns.
+
+Answers use four statuses. `SUPPORTED` means the full answer passed deterministic source and claim checks. `LIMITED` means some requested parts were not established; it contains only independently supported claims, with the remaining gaps stated separately. `INSUFFICIENT` means no releasable supported claim was found and the answer explains the gap or asks a clarification. `FAILED` means a technical error prevented completion. A model judgment can request more research or downgrade a result; it cannot promote insufficient evidence, bypass filters, expand the configured loop budget, or invent a source. Every released biomedical claim must map to retrieved evidence with an exact supporting abstract span.
+
+Bounds are controlled by `CONVERSATION_HISTORY_TURN_LIMIT` (default 12 recent entries), `CONVERSATION_MESSAGE_MAX_CHARS` (4000), `CONVERSATION_TITLE_MAX_CHARS` (80), `AGENT_OUTPUT_MAX_TOKENS` (800), `LLM_TIMEOUT_SECONDS` (30 seconds per provider request), and `MAX_CORRECTIVE_LOOPS` (2). A conversation allows one running turn; a concurrent duplicate receives HTTP 409. Conversations and linked administrator audit summaries are stored in the application SQLite database until that database is deliberately archived or removed. The agent sees only the configured recent history window and a bounded deterministic summary of older turns. Audit records retain bounded structured summaries and exclude prompts, raw model output, and private reasoning.
+
+The interface summarizes biomedical literature for research exploration; it does not provide medical advice or clinical decisions. `LLM_MODE=mock` uses deterministic fallback behavior and is suitable for offline UI and software checks only. It does not represent live planner or semantic-grading intelligence. Only `LLM_MODE=nim` with a valid `NVIDIA_API_KEY` exercises configured live NVIDIA NIM planning and semantic grading. Never release claims from model memory: a claim must have a retrieved PMID and exact supporting span.
+
+Run the deterministic conversation backend and frontend checks with:
+
+```powershell
+python -m pytest tests/adversarial/test_conversational_research_guardrails.py tests/unit/test_conversational_research_evaluation.py -q
+cd frontend
+npm run test:ui-conversations
+npm run test:ui-preview
+npm run test:ui-accounts
+npm run build
+```
+
+The fixture evaluator reads a JSON object, not the live corpus, and reports deterministic route accuracy, correction count, answer and abstention distribution, unsupported-claim rate, citation validity, attribution, latency, and model-call count. Optional LLM-as-judge or RAGAS-style signals are secondary evidence only:
+
+```powershell
+python scripts/evaluate_conversational_research.py path\to\fixture-report.json
+```
+
+Live NIM and real-index checks are separate from deterministic CI and require configured credentials and exclusive local index access. See `TEST_READY.md` and `frontend/tests/README.md` for their commands and prerequisites.
+
 ## Backend latency measurements
 
 While the API is running, run `python scripts/benchmark_research_latency.py --runs 3` from the project root. It reports HTTP wall time, admin-only workflow stages, each retrieval pass, and synthesis time without printing the administrator key or answer. The first run includes model/index loading; later runs reflect warm-request latency. `--max-loops 2` exercises corrective retrieval, and `--year-min 2026` can measure a no-result filter against an older corpus.
