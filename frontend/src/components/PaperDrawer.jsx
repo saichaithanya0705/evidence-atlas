@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import Icon from "./Icon.jsx";
-import Modal from "./Modal.jsx";
 import { formatScore, formatValue, pubmedUrl } from "../utils.js";
 
 const tabs = ["Overview", "Evidence", "Provenance", "Related"];
@@ -162,11 +161,7 @@ export default function PaperDrawer({
 
   const paper = { ...selectedPaper, ...paperDetails };
   return (
-    <Modal
-      className="panel paper-drawer"
-      label={"Selected paper details for PMID " + selectedPaper.pmid}
-      onClose={onClose}
-    >
+    <aside className="panel paper-drawer" aria-label={"Selected paper details for PMID " + selectedPaper.pmid}>
       <div className="panel-heading drawer-heading">
         <h2><Icon name="file" size={19} /> Selected paper</h2>
         <button className="icon-button drawer-close" type="button" aria-label="Close selected paper details" onClick={onClose}>
@@ -206,6 +201,6 @@ export default function PaperDrawer({
         {isAdmin && activeTab === "Provenance" && <PaperProvenance paper={paper} />}
         {isAdmin && activeTab === "Related" && <RelatedPapers paper={paper} papers={papers} onSelect={onSelect} />}
       </div>
-    </Modal>
+    </aside>
   );
 }

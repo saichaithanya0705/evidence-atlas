@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createConversation, getConversation, listConversations, submitConversationTurn } from "../api.js";
 import ConversationHistory from "./ConversationHistory.jsx";
 import ConversationList from "./ConversationList.jsx";
 import ResearchComposer from "./ResearchComposer.jsx";
+import EvidenceWorkspace from "./EvidenceWorkspace.jsx";
 
 function errorText(error) { return error instanceof Error ? error.message : "An unexpected error occurred."; }
 
-export default function ConversationWorkspace({ conversationId, isAdmin, navigate }) {
+export default function ConversationWorkspace({ conversationId, isAdmin, navigate, evidenceWorkspace }) {
   const [conversations, setConversations] = useState([]);
   const [turns, setTurns] = useState([]);
   const [activeConversation, setActiveConversation] = useState(null);
@@ -16,7 +17,6 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   const [submissionError, setSubmissionError] = useState("");
   const [pending, setPending] = useState(null);
   const [showList, setShowList] = useState(!conversationId);
-  const [selection, setSelection] = useState(null);
   const loadGeneration = useRef(0);
   const skipLoadId = useRef(null);
   const activeConversationIdRef = useRef(conversationId);
@@ -61,8 +61,15 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   const submitting = submittingIds.has(activeLockKey);
   useEffect(() => { if (focusAfterResponse.current && !submitting) { responseRef.current?.focus(); focusAfterResponse.current = false; } }, [turns, submitting]);
 
-  function startNew() { activeConversationIdRef.current = null; setActiveConversation(null); setTurns([]); setPending(null); setSubmissionError(""); setShowList(false); setSelection(null); navigate(isAdmin ? "/admin/research" : "/research"); }
-  function selectConversation(id) { activeConversationIdRef.current = id; setPending(null); setSubmissionError(""); setShowList(false); setSelection(null); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
+  function startNew() { activeConversationIdRef.current = null; setActiveConversation(null); setTurns([]); setPending(null); setSubmissionError(""); setShowList(false); navigate(isAdmin ? "/admin/research" : "/research"); }
+  function selectConversation(id) { activeConversationIdRef.current = id; setPending(null); setSubmissionError(""); setShowList(false); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
+  const openEvidence = useCallback((pmid, target = {}) => {
+    const matchingTurn = turns.find(turn => turn.turn_id === target.turnId);
+    const paper = target.paper || matchingTurn?.result?.retrieved_papers?.find(item => String(item.pmid) === String(pmid)) || turns.flatMap(turn => turn.result?.retrieved_papers || []).find(item => String(item.pmid) === String(pmid)) || { pmid, title: `PMID ${pmid}` };
+    const evidenceRecords = turns.flatMap(turn => turn.result?.evidence_table || []).filter(row => String(row.pmid) === String(pmid));
+    evidenceWorkspace.openPaper({ paper: { ...paper, pmid, evidenceRecords }, turnId: target.turnId, evidenceId: target.evidenceId, spanText: target.spanText });
+  }, [turns, evidenceWorkspace.openPaper]);
+  const openRankedPaper = useCallback((paper, target = {}) => openEvidence(paper.pmid, { ...target, paper }), [openEvidence]);
   async function submit(message, controls = {}) {
     const initialKey = conversationId || "__new__";
     if (inFlightRef.current.has(initialKey)) return false;
@@ -127,12 +134,12 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     {detailState.loading && <p role="status">Loading conversation…</p>}
     {detailState.error && <p className="conversation-error" role="alert">{detailState.error}</p>}
     {!detailState.loading && !detailState.error && <>
-      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={pmid => setSelection({ type: "evidence", pmid })} onPaper={paper => setSelection({ type: "paper", paper })} />}
+      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} />}
       {!conversationId && !showList && <p className="conversation-empty">Start with a research question. Your messages will be saved in this conversation.</p>}
       <ResearchComposer onSubmit={submit} submitting={submitting} isAdmin={isAdmin} />
       {submissionError && <p className="conversation-error" role="alert">{submissionError}</p>}
-      {selection && <p className="message-context" role="status">Selected source {selection.pmid || selection.paper?.pmid}. Open the paper from its source record to review the original study.</p>}
     </>}
     <p className="research-disclaimer" role="note">Research support, not medical advice. Review the original papers.</p>
+    <EvidenceWorkspace workspace={evidenceWorkspace} />
   </main>;
 }
