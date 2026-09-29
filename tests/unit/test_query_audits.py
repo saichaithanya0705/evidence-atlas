@@ -102,3 +102,17 @@ def test_unknown_request_fields_do_not_store_secret_values(audit_client):
     detail = AuditStore(path).detail(runs["items"][0]["id"])
     assert "private-password-should-not-persist" not in str(detail)
     assert "private-api-key-should-not-persist" not in str(detail)
+
+
+def test_audit_run_links_conversation_and_turn_without_breaking_legacy_callers(tmp_path):
+    path = tmp_path / "audit-links.sqlite3"
+    initialize_db(path)
+    account = AccountStore(path).create("alice", "Alice", "user", "hash", None, False)
+    audits = AuditStore(path)
+    audits.start("linked-run", account, "research", "question", {}, {}, conversation_id="conversation-1", turn_id="turn-1")
+    audits.start("legacy-run", account, "research", "old question", {}, {})
+
+    assert audits.detail("linked-run")["conversation_id"] == "conversation-1"
+    assert audits.detail("linked-run")["turn_id"] == "turn-1"
+    assert audits.detail("legacy-run")["conversation_id"] is None
+    assert audits.detail("legacy-run")["turn_id"] is None

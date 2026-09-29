@@ -15,13 +15,17 @@ class AuditStore:
     def __init__(self, path):
         self.path = path
 
-    def start(self, run_id, account, operation, query, requested, applied):
+    def start(self, run_id, account, operation, query, requested, applied, *, conversation_id=None, turn_id=None):
         if len(query) > 4000:
             raise ValueError("Research question exceeds 4000 characters")
         with connect_db(self.path) as db:
-            db.execute("INSERT INTO query_runs VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL)", (
+            db.execute("""INSERT INTO query_runs(
+                id, account_id, username, role, operation, query,
+                requested_controls, applied_controls, status, started_at,
+                finished_at, duration_ms, error, conversation_id, turn_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,?)""", (
                 run_id, account["id"], account["username"], account["role"], operation, query,
-                _json(requested), _json(applied), "running", utc_now(),
+                _json(requested), _json(applied), "running", utc_now(), conversation_id, turn_id,
             ))
 
     def event(self, run_id, stage, payload):

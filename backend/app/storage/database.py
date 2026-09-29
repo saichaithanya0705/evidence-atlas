@@ -32,9 +32,8 @@ def connect_db(path):
 def initialize_db(path) -> None:
     with connect_db(path) as db:
         db.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
-        if db.execute("SELECT 1 FROM schema_migrations WHERE version=1").fetchone():
-            return
-        db.executescript("""
+        if not db.execute("SELECT 1 FROM schema_migrations WHERE version=1").fetchone():
+            db.executescript("""
             CREATE TABLE accounts (
                 id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('user','admin')),
@@ -75,4 +74,44 @@ def initialize_db(path) -> None:
                 action TEXT NOT NULL, subject_id TEXT, timestamp TEXT NOT NULL
             );
         """)
-        db.execute("INSERT INTO schema_migrations VALUES (1, ?)", (utc_now(),))
+            db.execute("INSERT INTO schema_migrations VALUES (1, ?)", (utc_now(),))
+            db.commit()
+
+        if not db.execute("SELECT 1 FROM schema_migrations WHERE version=2").fetchone():
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM schema_migrations WHERE version=2").fetchone():
+                db.execute("""CREATE TABLE conversations (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(account_id) REFERENCES accounts(id)
+                )""")
+                db.execute("CREATE INDEX idx_conversations_account ON conversations(account_id)")
+                db.execute("CREATE INDEX idx_conversations_updated ON conversations(account_id, updated_at DESC, id DESC)")
+                db.execute("""CREATE TABLE conversation_turns (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    user_message TEXT NOT NULL,
+                    assistant_message TEXT,
+                    agent_action TEXT,
+                    standalone_query TEXT,
+                    complexity_hint TEXT,
+                    final_route TEXT,
+                    answer_status TEXT,
+                    status TEXT NOT NULL,
+                    audit_run_id TEXT,
+                    public_response_json TEXT,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+                )""")
+                db.execute("CREATE UNIQUE INDEX idx_conversation_turns_ordinal ON conversation_turns(conversation_id, ordinal)")
+                db.execute("CREATE UNIQUE INDEX idx_conversation_turns_one_running ON conversation_turns(conversation_id) WHERE status='running'")
+                db.execute("ALTER TABLE query_runs ADD COLUMN conversation_id TEXT")
+                db.execute("ALTER TABLE query_runs ADD COLUMN turn_id TEXT")
+                db.execute("CREATE INDEX idx_runs_conversation ON query_runs(conversation_id, started_at DESC)")
+                db.execute("CREATE INDEX idx_runs_turn ON query_runs(turn_id)")
+                db.execute("INSERT INTO schema_migrations VALUES (2, ?)", (utc_now(),))

@@ -89,3 +89,20 @@ def test_concurrent_admin_deactivation_keeps_one_active(tmp_path, monkeypatch):
     assert not one.is_alive() and not two.is_alive()
     assert outcomes.count("disabled") == 1
     assert sum(item["active"] for item in store.list_accounts()["items"] if item["role"] == "admin") == 1
+
+
+def test_deactivation_preserves_owned_conversation_and_audit_history(tmp_path):
+    from backend.app.storage.conversations import ConversationStore
+
+    path = tmp_path / "preserved.sqlite3"
+    initialize_db(path)
+    accounts = AccountStore(path)
+    account = accounts.create("alice", "Alice", "user", "hash", None, False)
+    conversation = ConversationStore(path).create(account["id"])
+    audits = AuditStore(path)
+    audits.start("history-run", account, "research", "question", {}, {}, conversation_id=conversation["id"])
+    audits.finish("history-run", "completed", {}, {})
+
+    accounts.update(account["id"], account["id"], active=False)
+    assert ConversationStore(path).detail_for_account(conversation["id"], account["id"])["conversation"]["id"] == conversation["id"]
+    assert AuditStore(path).detail("history-run")["conversation_id"] == conversation["id"]
