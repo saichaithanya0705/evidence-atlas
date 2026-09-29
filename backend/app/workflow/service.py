@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import logging
 import re
 import threading
@@ -191,17 +192,67 @@ class ResearchService:
         query: str,
         user_filters: Optional[Dict[str, Any]] = None,
         route_override: Optional[str] = None,
+        agent_complexity_hint: Optional[str] = None,
+        route_floor: Optional[str] = None,
+        agent_rewrite: Optional[str] = None,
     ) -> QueryPlan:
-        plan, _ = self._get_query_analysis_service().build_query_plan(
-            raw_query=query,
-            user_filters=self._normalize_user_filters(user_filters),
-            generate_embeddings=False,
-        )
+        query_analysis = self._get_query_analysis_service()
+        effective_floor = route_floor
         if route_override:
             route = str(route_override).upper()
             if route not in {"SIMPLE", "MODERATE", "COMPLEX"}:
                 raise ValueError("route_override must be SIMPLE, MODERATE, or COMPLEX")
-            plan = plan.model_copy(update={"route": route})
+            ranks = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
+            if (
+                effective_floor is None
+                or str(effective_floor).upper() not in ranks
+                or ranks[route] > ranks[str(effective_floor).upper()]
+            ):
+                effective_floor = route
+
+        plan_kwargs: Dict[str, Any] = {}
+        if agent_complexity_hint is not None:
+            plan_kwargs["agent_complexity_hint"] = agent_complexity_hint
+        if effective_floor is not None:
+            plan_kwargs["route_floor"] = effective_floor
+        if agent_rewrite is not None:
+            plan_kwargs["agent_rewrite"] = agent_rewrite
+        parameters = inspect.signature(query_analysis.build_query_plan).parameters
+        if not any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            plan_kwargs = {key: value for key, value in plan_kwargs.items() if key in parameters}
+
+        plan, _ = query_analysis.build_query_plan(
+            raw_query=query,
+            user_filters=self._normalize_user_filters(user_filters),
+            generate_embeddings=False,
+            **plan_kwargs,
+        )
+        if (
+            effective_floor
+            and "route_floor" not in parameters
+            and plan.route in {"SIMPLE", "MODERATE", "COMPLEX"}
+        ):
+            route = str(effective_floor).upper()
+            if route in {"SIMPLE", "MODERATE", "COMPLEX"}:
+                ranks = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
+                final_route = max((plan.route, route), key=ranks.__getitem__)
+                route_source = (
+                    "route_floor"
+                    if final_route == route and final_route != plan.route
+                    else "rule"
+                )
+                plan = plan.model_copy(
+                    update={"route": final_route, "route_floor": route, "route_source": route_source}
+                )
+        elif route_override:
+            route = str(route_override).upper()
+            if route in {"SIMPLE", "MODERATE", "COMPLEX"} and plan.route in {"SIMPLE", "MODERATE", "COMPLEX"}:
+                ranks = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
+                if ranks[route] > ranks[plan.route]:
+                    plan = plan.model_copy(update={"route": route})
         return plan
 
     def _search_plan(self, plan: QueryPlan, top_k: int) -> Tuple[List[RetrievalCandidate], Dict[str, Any]]:

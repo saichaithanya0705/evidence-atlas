@@ -115,6 +115,26 @@ class SearchFilters(BaseModel):
     )
 
 
+# Query-domain name used at the enhancer boundary; preserve SearchFilters as
+# the established public name for existing callers.
+QueryFilters = SearchFilters
+
+
+class EnhancedQuery(BaseModel):
+    """Query understanding output kept separate from routing decisions."""
+    model_config = ConfigDict(extra="ignore")
+
+    raw_query: str
+    agent_rewrite: Optional[str] = None
+    canonical_query: str
+    concepts: List[str] = Field(default_factory=list)
+    must_have_concepts: List[str] = Field(default_factory=list)
+    optional_expansions: List[str] = Field(default_factory=list)
+    filters: QueryFilters = Field(default_factory=QueryFilters)
+    intent: str = "evidence_summary"
+    transformation_notes: List[str] = Field(default_factory=list)
+
+
 class RoutingDecision(BaseModel):
     """
     Structured routing decision output from Adaptive Complexity Router (FEAT-R3-11).
@@ -179,6 +199,10 @@ class QueryPlan(BaseModel):
         default="SIMPLE",
         description="Adaptive routing decision (SIMPLE, MODERATE, COMPLEX)"
     )
+    agent_complexity_hint: Optional[str] = Field(default=None, description="Advisory route hint supplied by the agent")
+    rule_route: Optional[ComplexityRoute] = Field(default=None, description="Route selected by deterministic router rules")
+    route_floor: Optional[str] = Field(default=None, description="Prior route retained as a minimum complexity floor")
+    route_source: Optional[str] = Field(default=None, description="Input that determined the final route")
     router_confidence: float = Field(
         default=1.0,
         ge=0.0,

@@ -53,6 +53,51 @@ class AdaptiveComplexityRouter:
     Implements 7-rule fast-path heuristics and LLM fallback (FEAT-R3-11).
     """
 
+    _ROUTE_RANK = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
+
+    def arbitrate(
+        self,
+        rule_decision: RoutingDecision,
+        *,
+        agent_hint: Optional[str] = None,
+        route_floor: Optional[str] = None,
+    ) -> RoutingDecision:
+        """Apply advisory inputs as upward-only route constraints."""
+        rule_route = rule_decision.route
+        valid_hint = str(agent_hint).upper() if agent_hint is not None else None
+        valid_floor = str(route_floor).upper() if route_floor is not None else None
+        if valid_hint not in self._ROUTE_RANK:
+            valid_hint = None
+        if valid_floor not in self._ROUTE_RANK:
+            valid_floor = None
+
+        highest_rank = max(
+            self._ROUTE_RANK[rule_route],
+            self._ROUTE_RANK[valid_hint] if valid_hint else -1,
+            self._ROUTE_RANK[valid_floor] if valid_floor else -1,
+        )
+        final_route = next(
+            route for route, rank in self._ROUTE_RANK.items() if rank == highest_rank
+        )
+        if final_route == rule_route:
+            return rule_decision
+
+        changed_by = []
+        if valid_hint and self._ROUTE_RANK[valid_hint] == highest_rank:
+            changed_by.append("agent hint")
+        if valid_floor and self._ROUTE_RANK[valid_floor] == highest_rank:
+            changed_by.append("route floor")
+        source = " and ".join(changed_by)
+        return rule_decision.model_copy(
+            update={
+                "route": final_route,
+                "reasoning": (
+                    f"{rule_decision.reasoning} Final route raised from {rule_route} to "
+                    f"{final_route} by {source}."
+                ),
+            }
+        )
+
     def route_query(
         self,
         query: str,

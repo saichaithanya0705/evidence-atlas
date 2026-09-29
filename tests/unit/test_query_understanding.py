@@ -505,3 +505,88 @@ class TestAdaptiveComplexityRouter:
         assert len(decision.reasoning) > 10
         assert "vaccine" not in decision.reasoning.lower()
         assert "safety" in decision.reasoning.lower()
+
+    def test_arbitration_never_allows_agent_hint_to_lower_rule_route(self):
+        router = AdaptiveComplexityRouter()
+        rule = RoutingDecision(
+            route="COMPLEX",
+            confidence=0.93,
+            reasoning="A comparison requires decomposed evidence review.",
+            rule_applied="RULE_2_HEAD_TO_HEAD_COMPARISON",
+        )
+
+        decision = router.arbitrate(rule, agent_hint="SIMPLE")
+
+        assert decision.route == "COMPLEX"
+        assert decision.confidence == 0.93
+        assert decision.rule_applied == rule.rule_applied
+
+    def test_arbitration_allows_valid_agent_hint_to_raise_rule_route(self):
+        router = AdaptiveComplexityRouter()
+        rule = RoutingDecision(
+            route="SIMPLE",
+            confidence=0.85,
+            reasoning="Standard direct hybrid retrieval pass.",
+            rule_applied="RULE_DEFAULT_SIMPLE",
+        )
+
+        decision = router.arbitrate(rule, agent_hint="COMPLEX")
+
+        assert decision.route == "COMPLEX"
+        assert decision.confidence == 0.85
+        assert decision.rule_applied == rule.rule_applied
+        assert "agent" in decision.reasoning.lower()
+
+    def test_arbitration_preserves_prior_route_floor_and_ignores_invalid_hint(self):
+        router = AdaptiveComplexityRouter()
+        rule = RoutingDecision(
+            route="SIMPLE",
+            confidence=0.86,
+            reasoning="Standard direct hybrid retrieval pass.",
+            rule_applied="RULE_DEFAULT_SIMPLE",
+        )
+
+        decision = router.arbitrate(rule, agent_hint="not-a-route", route_floor="COMPLEX")
+
+        assert decision.route == "COMPLEX"
+        assert decision.confidence == 0.86
+        assert "floor" in decision.reasoning.lower()
+
+    def test_arbitration_without_hint_keeps_legacy_decision(self):
+        router = AdaptiveComplexityRouter()
+        rule = RoutingDecision(
+            route="MODERATE",
+            confidence=0.91,
+            reasoning="Temporal and cohort constraints require expansion.",
+            rule_applied="RULE_5_FILTERED_CLINICAL_QUERY",
+        )
+
+        decision = router.arbitrate(rule)
+
+        assert decision.model_dump() == rule.model_dump()
+
+
+def test_query_enhancement_preserves_rewrite_raw_must_have_and_explicit_filters():
+    service = QueryAnalysisService()
+    raw = "Sotorasib resistance mechanisms in KRAS G12C NSCLC"
+    rewrite = "Sotorasib resistance pathway evidence in KRAS G12C non-small cell lung cancer"
+
+    enhanced = service.enhance_query(
+        raw,
+        agent_rewrite=rewrite,
+        explicit_filters=SearchFilters(
+            year_min=2021,
+            year_max=2025,
+            study_type_filters=["Randomized Controlled Trial"],
+        ),
+    )
+
+    assert enhanced.raw_query == raw
+    assert enhanced.agent_rewrite == rewrite
+    assert enhanced.canonical_query
+    must_have = " ".join(enhanced.must_have_concepts).casefold()
+    assert "sotorasib" in must_have
+    assert "g12c" in must_have
+    assert enhanced.filters.year_min == 2021
+    assert enhanced.filters.year_max == 2025
+    assert enhanced.filters.study_type_filters == ["Randomized Controlled Trial"]

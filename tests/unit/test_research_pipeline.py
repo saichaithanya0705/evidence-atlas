@@ -6,6 +6,8 @@ import pytest
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
+from backend.app.query.query_service import QueryAnalysisService
+from backend.app.query.router import AdaptiveComplexityRouter
 from backend.app.retrieval.hybrid import HybridRetriever, reciprocal_rank_fusion
 from backend.app.retrieval.reranker import MedCPTReranker
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
@@ -222,6 +224,47 @@ def test_research_corrective_loop_respects_budget_and_records_stages():
     assert [stage["stage"] for stage in trace["stages"]][-5:] == [
         "evidence_extraction", "synthesize", "validate", "citation_verification", "done"
     ]
+
+
+def test_initial_and_corrective_plans_cross_enhancer_before_router():
+    events = []
+
+    class ObservedRouter(AdaptiveComplexityRouter):
+        def route_query(self, query, clean_query, *args, **kwargs):
+            events.append(("route", query))
+            return super().route_query(query, clean_query, *args, **kwargs)
+
+    class ObservedQueryAnalysis(QueryAnalysisService):
+        def enhance_query(self, raw_query, **kwargs):
+            events.append(("enhance", raw_query))
+            return super().enhance_query(raw_query, **kwargs)
+
+    analysis = ObservedQueryAnalysis(router=ObservedRouter())
+    service = make_test_service()
+    service._query_analysis_service = analysis
+
+    service.research("Empagliflozin diabetes kidney outcomes", max_loops=1, request_id="enhancer-boundary")
+
+    assert len([event for event in events if event[0] == "enhance"]) == 2
+    assert len([event for event in events if event[0] == "route"]) == 2
+    assert [kind for kind, _ in events] == ["enhance", "route", "enhance", "route"]
+    assert events[0][1] == "Empagliflozin diabetes kidney outcomes"
+    assert events[2][1] != events[0][1]
+
+
+def test_research_plan_forwards_agent_hint_and_prior_route_floor():
+    service = make_test_service()
+    service._query_analysis_service = QueryAnalysisService()
+
+    raised_by_hint = service._build_plan("Sotorasib", agent_complexity_hint="COMPLEX")
+    raised_by_floor = service._build_plan("Sotorasib", route_floor="MODERATE")
+
+    assert raised_by_hint.route == "COMPLEX"
+    assert raised_by_hint.agent_complexity_hint == "COMPLEX"
+    assert raised_by_hint.rule_route == "SIMPLE"
+    assert raised_by_hint.route_source == "agent_hint"
+    assert raised_by_floor.route == "MODERATE"
+    assert raised_by_floor.route_source == "route_floor"
 
 
 def test_research_graph_routes_sufficient_evidence_directly_to_synthesis():

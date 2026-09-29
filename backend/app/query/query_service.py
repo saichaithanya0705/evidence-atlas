@@ -26,8 +26,10 @@ from backend.app.query.models import (
     ComplexityRoute,
     ConceptWeights,
     DualQueryEmbeddings,
+    EnhancedQuery,
     NonPICOConcepts,
     PICOModel,
+    QueryFilters,
     QueryPlan,
     SearchFilters,
 )
@@ -178,11 +180,123 @@ class QueryAnalysisService:
         self.embedding_generator = embedding_generator or DualQueryEmbeddingGenerator()
         self.router = router or AdaptiveComplexityRouter()
 
+    @staticmethod
+    def _coerce_filters(filters: Any) -> Optional[QueryFilters]:
+        if filters is None:
+            return None
+        if hasattr(filters, "model_dump"):
+            data = filters.model_dump(exclude_none=True)
+        else:
+            data = dict(filters)
+        if "study_type_filters" not in data and "study_types" in data:
+            data["study_type_filters"] = data.pop("study_types")
+        return QueryFilters(**data)
+
+    def _prepare_enhancement(
+        self,
+        raw_query: str,
+        *,
+        agent_rewrite: Optional[str] = None,
+        explicit_filters: Any = None,
+    ) -> Dict[str, Any]:
+        combined_query = raw_query
+        notes = ["Preserved the verbatim user query."]
+        if agent_rewrite and agent_rewrite.strip():
+            combined_query = f"{raw_query} {agent_rewrite.strip()}"
+            notes.append("Added the agent rewrite alongside the raw query for concept coverage.")
+
+        # Analyze both inputs together so a rewrite cannot erase concepts from
+        # the user's original wording.
+        _, clean_q, acronyms = self.normalizer.normalize(combined_query)
+        mesh_terms, raw_concepts = self.mesh_identifier.identify_concepts(
+            clean_q, combined_query, acronyms
+        )
+        inferred_filters = self.filter_extractor.extract_filters(raw_query)
+        selected_filters = self._coerce_filters(explicit_filters)
+        final_year_min = (
+            selected_filters.year_min
+            if selected_filters and selected_filters.year_min is not None
+            else inferred_filters.year_min
+        )
+        final_year_max = (
+            selected_filters.year_max
+            if selected_filters and selected_filters.year_max is not None
+            else inferred_filters.year_max
+        )
+        final_study_types = (
+            selected_filters.study_type_filters
+            if selected_filters and selected_filters.study_type_filters
+            else inferred_filters.study_type_filters
+        )
+        final_filters = QueryFilters(
+            year_min=final_year_min,
+            year_max=final_year_max,
+            study_type_filters=final_study_types,
+        )
+
+        pico = self.pico_extractor.extract(combined_query, clean_q)
+        non_pico = self.non_pico_extractor.extract(combined_query, clean_q)
+        intent = self.intent_classifier.classify(combined_query, clean_q, pico)
+        concept_weights = assign_concept_weights(
+            pico, non_pico, mesh_terms, acronyms, self.mesh_service
+        )
+        canonical_q = self.canonical_formulator.formulate_deterministic(
+            original_query=combined_query,
+            clean_query=clean_q,
+            mesh_terms=mesh_terms,
+            pico=pico,
+            acronyms_expanded=acronyms,
+        )
+        for concept in concept_weights.must_have:
+            if concept.casefold() not in canonical_q.casefold():
+                canonical_q = f"{canonical_q}; required concept: {concept}"
+                notes.append(f"Retained required concept: {concept}.")
+
+        enhanced = EnhancedQuery(
+            raw_query=raw_query,
+            agent_rewrite=agent_rewrite,
+            canonical_query=canonical_q,
+            concepts=concept_weights.high_priority or raw_concepts or [clean_q],
+            must_have_concepts=concept_weights.must_have,
+            optional_expansions=concept_weights.optional,
+            filters=final_filters,
+            intent=intent,
+            transformation_notes=notes,
+        )
+        return {
+            "enhanced": enhanced,
+            "clean_query": clean_q,
+            "acronyms": acronyms,
+            "mesh_terms": mesh_terms,
+            "pico": pico,
+            "non_pico": non_pico,
+            "concept_weights": concept_weights,
+        }
+
+    def enhance_query(
+        self,
+        raw_query: str,
+        *,
+        agent_rewrite: Optional[str] = None,
+        explicit_filters: Optional[QueryFilters] = None,
+    ) -> EnhancedQuery:
+        """Preserve raw and rewritten text while extracting guarded query intent."""
+        return self._prepare_enhancement(
+            raw_query,
+            agent_rewrite=agent_rewrite,
+            explicit_filters=explicit_filters,
+        )["enhanced"]
+
     def build_query_plan(
         self,
         raw_query: str,
         user_filters: Optional[Dict[str, Any]] = None,
         generate_embeddings: bool = False,
+        *,
+        agent_rewrite: Optional[str] = None,
+        agent_complexity_hint: Optional[str] = None,
+        route_floor: Optional[str] = None,
+        explicit_filters: Optional[QueryFilters] = None,
     ) -> Tuple[QueryPlan, Optional[DualQueryEmbeddings]]:
         """
         Synchronously executes the complete query understanding pipeline.
@@ -195,42 +309,36 @@ class QueryAnalysisService:
         Returns:
             Tuple of (QueryPlan, Optional[DualQueryEmbeddings]).
         """
-        user_filters = user_filters or {}
-
-        # 1. FEAT-R3-01 & FEAT-R3-02: Normalize while preserving original query verbatim
-        orig_q, clean_q, acronyms = self.normalizer.normalize(raw_query)
-
-        # 2. FEAT-R3-03: MeSH Concept Identification
-        mesh_terms, raw_concepts = self.mesh_identifier.identify_concepts(clean_q, orig_q, acronyms)
-
-        # 3. FEAT-R3-05: Search Filter Extraction
-        inferred_filters = self.filter_extractor.extract_filters(orig_q)
-        final_year_min = user_filters.get("year_min") if user_filters.get("year_min") is not None else inferred_filters.year_min
-        final_year_max = user_filters.get("year_max") if user_filters.get("year_max") is not None else inferred_filters.year_max
-        final_study_types = user_filters.get("study_types") or inferred_filters.study_type_filters
-
-        # 4. FEAT-R3-07 & FEAT-R3-08: PICO and Non-PICO Extraction
-        pico = self.pico_extractor.extract(orig_q, clean_q)
-        non_pico = self.non_pico_extractor.extract(orig_q, clean_q)
-
-        # 5. FEAT-R3-09: Research Intent Classification
-        intent = self.intent_classifier.classify(orig_q, clean_q, pico)
-
-        # 6. FEAT-R3-10: Concept Weighting
-        concept_weights = assign_concept_weights(pico, non_pico, mesh_terms, acronyms, self.mesh_service)
-        high_priority_concepts = concept_weights.high_priority or raw_concepts or [clean_q]
-
-        # 7. FEAT-R3-04: Canonical Query Formulation
-        canonical_q = self.canonical_formulator.formulate_deterministic(
-            original_query=orig_q,
-            clean_query=clean_q,
-            mesh_terms=mesh_terms,
-            pico=pico,
-            acronyms_expanded=acronyms,
+        filter_input = explicit_filters if explicit_filters is not None else user_filters
+        prepared = self._prepare_enhancement(
+            raw_query,
+            agent_rewrite=agent_rewrite,
+            explicit_filters=filter_input,
         )
+        # Route only after the public enhancement boundary has produced its
+        # guarded result. Keep this call explicit so subclasses and callers can
+        # observe every query entering the router.
+        enhanced = self.enhance_query(
+            raw_query,
+            agent_rewrite=agent_rewrite,
+            explicit_filters=filter_input,
+        )
+        orig_q = raw_query
+        clean_q = prepared["clean_query"]
+        acronyms = prepared["acronyms"]
+        mesh_terms = prepared["mesh_terms"]
+        pico = prepared["pico"]
+        non_pico = prepared["non_pico"]
+        concept_weights = prepared["concept_weights"]
+        high_priority_concepts = enhanced.concepts
+        intent = enhanced.intent
+        canonical_q = enhanced.canonical_query
+        final_year_min = enhanced.filters.year_min
+        final_year_max = enhanced.filters.year_max
+        final_study_types = enhanced.filters.study_type_filters
 
         # 8. FEAT-R3-11: Adaptive Complexity Routing
-        routing_decision = self.router.route_query(
+        rule_decision = self.router.route_query(
             query=orig_q,
             clean_query=clean_q,
             pico=pico,
@@ -239,6 +347,11 @@ class QueryAnalysisService:
             year_min=final_year_min,
             year_max=final_year_max,
             intent=intent,
+        )
+        routing_decision = self.router.arbitrate(
+            rule_decision,
+            agent_hint=agent_complexity_hint,
+            route_floor=route_floor,
         )
 
         # 9. Subquery expansion based on routing complexity
@@ -280,6 +393,15 @@ class QueryAnalysisService:
             hard_filters=hard_filters,
             intent=intent,
             route=routing_decision.route,
+            agent_complexity_hint=agent_complexity_hint,
+            rule_route=rule_decision.route,
+            route_floor=route_floor,
+            route_source=self._route_source(
+                rule_decision.route,
+                routing_decision.route,
+                agent_complexity_hint,
+                route_floor,
+            ),
             router_confidence=routing_decision.confidence,
             router_reasoning=routing_decision.reasoning,
             subqueries=subqueries,
@@ -287,6 +409,22 @@ class QueryAnalysisService:
         )
 
         return query_plan, embeddings_model
+
+    @staticmethod
+    def _route_source(
+        rule_route: ComplexityRoute,
+        final_route: ComplexityRoute,
+        agent_hint: Optional[str],
+        route_floor: Optional[str],
+    ) -> str:
+        if final_route == rule_route:
+            return "rule"
+        sources = []
+        if agent_hint and str(agent_hint).upper() == final_route:
+            sources.append("agent_hint")
+        if route_floor and str(route_floor).upper() == final_route:
+            sources.append("route_floor")
+        return "+".join(sources) or "rule"
 
     async def analyze(
         self,
