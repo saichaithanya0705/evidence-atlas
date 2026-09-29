@@ -15,10 +15,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 from backend.app.evidence.extraction import EvidenceAnalyzer, EvidenceExtractor
-from backend.app.models.request_response import ResearchResponse, RetrievalCandidate
+from backend.app.models.request_response import AnswerStatus, EvidenceRecord, ResearchResponse, RetrievalCandidate
+from backend.app.conversation.models import CorrectiveResearchProposal, EvidenceGapContext
 from backend.app.query.models import QueryPlan
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
-from backend.app.workflow.synthesis import EvidenceSynthesizer
+from backend.app.workflow.synthesis import EvidenceSynthesizer, _claims
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class _WorkflowState:
     active_stage: str = "start"
     current_query: Optional[str] = None
     current_route: Optional[str] = None
+    route_floor: Optional[str] = None
+    current_complexity_hint: Optional[str] = None
     loop_count: int = 0
     iteration: int = 0
     pending_plan: Optional[QueryPlan] = None
@@ -67,6 +70,7 @@ class _WorkflowState:
     analysis: Dict[str, Any] = field(default_factory=dict)
     synthesis: Any = None
     response: Optional[ResearchResponse] = None
+    technical_failure: bool = False
     trace_payload: Dict[str, Any] = field(default_factory=dict)
     pending_details: Dict[str, Any] = field(default_factory=dict)
     next_query: Optional[str] = None
@@ -329,7 +333,11 @@ class ResearchService:
         state.active_stage = target
         state.stages.append({"stage": target, "status": "started", **details})
         if state.event_sink:
-            state.event_sink(target, {"status": "started", **details})
+            payload = {"status": "started"}
+            for key in ("iteration", "corrective_attempt", "remaining_budget", "stop_reason", "route"):
+                if key in details:
+                    payload[key] = details[key]
+            state.event_sink(target, payload)
 
     @staticmethod
     def _merge_candidates(
@@ -414,6 +422,11 @@ class ResearchService:
         max_loops: int = 2,
         request_id: Optional[str] = None,
         event_sink: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        *,
+        agent_rewrite: Optional[str] = None,
+        agent_complexity_hint: Optional[str] = None,
+        route_floor: Optional[str] = None,
+        gap_reviewer: Optional[Callable[[EvidenceGapContext], Optional[CorrectiveResearchProposal]]] = None,
     ) -> ResearchResponse:
         """Run the bounded route→retrieve→judge→correct→evidence→validate graph."""
         if not query or not query.strip():
@@ -423,15 +436,35 @@ class ResearchService:
         configured_budget = max(0, int(getattr(self.settings, "MAX_CORRECTIVE_LOOPS", max_loops)))
         budget = min(max(0, int(max_loops)), configured_budget)
         state = _WorkflowState(request_id=request_id, query=query, user_filters=filters, event_sink=event_sink)
+        route_ranks = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
+
+        def normalize_query(value: str) -> str:
+            return re.sub(r"\s+", " ", value).strip().casefold()
+
+        initial_floor = str(route_floor or "SIMPLE").upper()
+        if initial_floor not in route_ranks:
+            raise ValueError("route_floor must be SIMPLE, MODERATE, or COMPLEX")
+        state.route_floor = initial_floor
+        state.current_complexity_hint = agent_complexity_hint
+        used_queries = [query]
         research_started = perf_counter()
         from langgraph.graph import END, START, StateGraph
 
         def query_analysis_node(data: _GraphInput) -> Dict[str, _WorkflowState]:
             workflow = data["workflow"]
             self._transition(workflow, "query_analysis")
-            workflow.initial_plan = self._build_plan(query, filters)
-            workflow.current_query = query
+            workflow.initial_plan = self._build_plan(
+                query, filters, agent_complexity_hint=agent_complexity_hint,
+                route_floor=workflow.route_floor, agent_rewrite=agent_rewrite,
+            )
+            workflow.current_query = agent_rewrite or query
             workflow.current_route = workflow.initial_plan.route
+            workflow.route_floor = max(
+                (workflow.route_floor, workflow.initial_plan.route), key=route_ranks.__getitem__
+            )
+            if workflow.event_sink:
+                workflow.event_sink("query_enhanced", {"iteration": 0, "rewrite_applied": bool(agent_rewrite)})
+                workflow.event_sink("route_arbitrated", {"iteration": 0, "route": workflow.current_route, "route_floor": workflow.route_floor})
             workflow.stages.append(
                 {
                     "stage": "router",
@@ -446,14 +479,28 @@ class ResearchService:
             workflow = data["workflow"]
             current_query = workflow.current_query or query
             self._transition(workflow, "retrieve", iteration=workflow.iteration, query=current_query)
-            plan = (
-                workflow.initial_plan
-                if workflow.iteration == 0
-                else self._build_plan(current_query, filters, workflow.current_route)
+            plan = workflow.initial_plan if workflow.iteration == 0 else self._build_plan(
+                query, filters, route_floor=workflow.route_floor,
+                agent_rewrite=current_query,
+                agent_complexity_hint=workflow.current_complexity_hint,
             )
-            candidates, details = self._search_plan(
-                plan, top_k=int(getattr(self.settings, "DENSE_TOP_K", 30))
+            workflow.route_floor = max(
+                (workflow.route_floor, plan.route), key=route_ranks.__getitem__
             )
+            workflow.current_route = plan.route
+            if workflow.iteration > 0 and workflow.event_sink:
+                workflow.event_sink("query_enhanced", {"iteration": workflow.iteration, "rewrite_applied": True})
+                workflow.event_sink("route_arbitrated", {"iteration": workflow.iteration, "route": workflow.current_route, "route_floor": workflow.route_floor})
+            if workflow.event_sink:
+                workflow.event_sink("retrieval_attempt", {"iteration": workflow.iteration, "route": plan.route})
+            try:
+                candidates, details = self._search_plan(
+                    plan, top_k=int(getattr(self.settings, "DENSE_TOP_K", 30))
+                )
+            except Exception:
+                workflow.technical_failure = True
+                workflow.stop_reason = "retrieval_failed"
+                candidates, details = [], {"retrieval": {}, "reranker": {}, "timings_ms": {}}
             self._merge_candidates(workflow.candidates_by_pmid, candidates, workflow.iteration)
             all_candidates = sorted(
                 workflow.candidates_by_pmid.values(),
@@ -472,7 +519,16 @@ class ResearchService:
                 workflow.ranked_candidates,
                 int(getattr(self.settings, "RERANKER_TOP_N", 10)),
             )
-            workflow.grade = self._get_judge().judge(workflow.initial_plan, judge_candidates)
+            if workflow.technical_failure:
+                workflow.grade = EvidenceGrade("INSUFFICIENT", [], {}, "Retrieval failed before evidence could be judged.")
+            else:
+                workflow.grade = self._get_judge().judge(workflow.initial_plan, judge_candidates)
+            if workflow.event_sink:
+                workflow.event_sink("evidence_judged", {
+                    "iteration": workflow.iteration, "grade": workflow.grade.grade,
+                    "missing_count": len(workflow.grade.missing_concepts),
+                    "conflict_count": len(workflow.grade.conflicts),
+                })
             plan = workflow.pending_plan
             workflow.retrieval_iterations.append(
                 {
@@ -488,18 +544,56 @@ class ResearchService:
                 }
             )
             workflow.next_query = None
-            if workflow.grade.grade == "SUFFICIENT":
+            if workflow.technical_failure:
+                workflow.stop_reason = "retrieval_failed"
+            elif workflow.grade.grade == "SUFFICIENT":
                 workflow.stop_reason = "evidence_sufficient"
+            elif workflow.grade.conflicts:
+                workflow.stop_reason = "unresolved_conflict"
             elif workflow.loop_count >= data["budget"]:
                 workflow.stop_reason = "correction_budget_exhausted" if data["budget"] else "correction_disabled"
             else:
-                workflow.next_query = self._corrective_query(
-                    workflow.initial_plan,
-                    workflow.grade,
-                    [query, *workflow.corrective_queries],
-                )
+                proposal_query = None
+                if gap_reviewer is not None:
+                    gap_context = EvidenceGapContext(
+                        standalone_question=query,
+                        deterministic_grade=workflow.grade.grade,
+                        missing_concepts=workflow.grade.missing_concepts[:20],
+                        missing_subquestions=workflow.grade.missing_subquestions[:20],
+                        conflicts=workflow.grade.conflicts[:20],
+                        prior_queries=[normalize_query(item) for item in used_queries[-20:]],
+                        route_floor=workflow.route_floor,
+                    )
+                    try:
+                        proposal = gap_reviewer(gap_context)
+                        if proposal is not None:
+                            if not isinstance(proposal, CorrectiveResearchProposal):
+                                proposal = CorrectiveResearchProposal.model_validate(proposal)
+                            if route_ranks[proposal.complexity_hint] >= route_ranks[workflow.route_floor]:
+                                proposal_query = proposal.standalone_query
+                                workflow.current_complexity_hint = proposal.complexity_hint
+                            else:
+                                workflow.stop_reason = "correction_rejected_below_route_floor"
+                    except Exception:
+                        proposal_query = None
+                    if workflow.event_sink:
+                        workflow.event_sink("agent_decision", {
+                            "iteration": workflow.iteration,
+                            "accepted": bool(proposal_query),
+                            "route_floor": workflow.route_floor,
+                        })
+                normalized_used = {normalize_query(item) for item in used_queries}
+                if proposal_query and normalize_query(proposal_query) not in normalized_used:
+                    workflow.next_query = proposal_query
+                else:
+                    workflow.next_query = self._corrective_query(
+                        workflow.initial_plan, workflow.grade, used_queries
+                    )
+                    workflow.current_complexity_hint = None
                 if workflow.next_query is None:
-                    workflow.stop_reason = "correction_stalled"
+                    workflow.stop_reason = workflow.stop_reason or "correction_stalled"
+                    if workflow.event_sink:
+                        workflow.event_sink("correction_stopped", {"reason": workflow.stop_reason, "iteration": workflow.iteration})
             return {"workflow": workflow}
 
         def route_after_judge(data: _GraphInput) -> str:
@@ -510,6 +604,7 @@ class ResearchService:
             workflow = data["workflow"]
             workflow.current_query = workflow.next_query
             workflow.corrective_queries.append(workflow.current_query)
+            used_queries.append(workflow.current_query)
             workflow.loop_count += 1
             workflow.iteration += 1
             self._transition(
@@ -561,7 +656,12 @@ class ResearchService:
             workflow.synthesis = self._get_synthesizer().synthesize(
                 query,
                 workflow.evidence_records,
-                workflow.analysis["evidence_gaps"],
+                list(dict.fromkeys(
+                    workflow.analysis["evidence_gaps"]
+                    + (workflow.grade.missing_concepts if workflow.grade else [])
+                    + (workflow.grade.missing_subquestions if workflow.grade else [])
+                    + (workflow.grade.conflicts if workflow.grade else [])
+                )),
                 insufficient=insufficient,
             )
             return {"workflow": workflow}
@@ -575,7 +675,14 @@ class ResearchService:
                 citation_precision=synthesis.audit.precision,
                 citations_valid=synthesis.audit.valid,
             )
-            if not synthesis.audit.valid:
+            if workflow.technical_failure:
+                workflow.stop_reason = "retrieval_failed"
+                response_text = "A technical failure prevented retrieval and evidence validation."
+                citations = []
+                audit_valid = False
+                precision = 0.0
+                audit_dict = {"valid": False, "technical_failure": True, "cited_pmids": [], "citation_precision": 0.0}
+            elif not synthesis.audit.valid:
                 workflow.stop_reason = "citation_validation_failed_fail_closed"
                 response_text = "The available retrieved evidence is insufficient to provide a validated research summary."
                 citations: List[str] = []
@@ -606,6 +713,13 @@ class ResearchService:
                 }
             )
             workflow.response = ResearchResponse(
+                answer_status=(
+                    AnswerStatus.FAILED if workflow.technical_failure
+                    else AnswerStatus.INSUFFICIENT if workflow.analysis["consensus_level"] == "conflicting" or (workflow.grade and workflow.grade.conflicts)
+                    else AnswerStatus.SUPPORTED if workflow.grade and workflow.grade.grade == "SUFFICIENT" and synthesis.audit.valid and synthesis.audit.cited_pmids
+                    else AnswerStatus.LIMITED if synthesis.audit.valid and synthesis.audit.cited_pmids and workflow.analysis["consensus_level"] != "conflicting"
+                    else AnswerStatus.INSUFFICIENT
+                ),
                 request_id=request_id,
                 query=query,
                 canonical_query=workflow.initial_plan.canonical_query,
@@ -616,10 +730,17 @@ class ResearchService:
                 citations_valid=audit_valid,
                 citation_precision=precision,
                 consensus_level=workflow.analysis["consensus_level"],
-                evidence_gaps=workflow.analysis["evidence_gaps"],
+                evidence_gaps=([] if workflow.technical_failure else list(dict.fromkeys(
+                    workflow.analysis["evidence_gaps"]
+                    + (workflow.grade.missing_concepts if workflow.grade else [])
+                    + (workflow.grade.missing_subquestions if workflow.grade else [])
+                    + (workflow.grade.conflicts if workflow.grade else [])
+                ))),
                 audit_trace_url=f"/trace/{request_id}",
                 retrieved_papers=workflow.ranked_candidates,
             )
+            if workflow.event_sink:
+                workflow.event_sink("answer_released", {"status": workflow.response.answer_status.value, "claim_count": len(workflow.response.cited_pmids), "gap_count": len(workflow.response.evidence_gaps)})
             insufficient = not workflow.grade or workflow.grade.grade != "SUFFICIENT"
             workflow.trace_payload = {
                 "request_id": request_id,
@@ -660,15 +781,15 @@ class ResearchService:
         def timed_node(name: str, node: Any) -> Any:
             def completed_details(workflow: _WorkflowState) -> Dict[str, Any]:
                 if name == "query_analysis" and workflow.initial_plan:
-                    return {"query_plan": workflow.initial_plan.model_dump(mode="json", exclude={"embeddings"}), "route": workflow.current_route}
+                    return {"query_plan": {"route": workflow.initial_plan.route, "canonical_query": workflow.initial_plan.canonical_query[:240]}, "route": workflow.current_route}
                 if name == "retrieve":
-                    return {"candidate_pmids": [item.pmid for item in workflow.pending_candidates], "retrieval": workflow.pending_details.get("retrieval", {}), "reranker": workflow.pending_details.get("reranker", {})}
+                    return {"candidate_pmids": [item.pmid for item in workflow.pending_candidates[:20]], "candidate_count": len(workflow.pending_candidates)}
                 if name == "judge" and workflow.grade:
-                    return {"grade": workflow.grade.to_dict() if hasattr(workflow.grade, "to_dict") else dict(workflow.grade), "stop_reason": workflow.stop_reason}
+                    return {"grade": workflow.grade.grade, "missing_count": len(workflow.grade.missing_concepts), "conflict_count": len(workflow.grade.conflicts), "stop_reason": workflow.stop_reason}
                 if name == "evidence":
-                    return {"evidence_count": len(workflow.evidence_records), "evidence": [{"pmid": record.pmid, "supporting_text_spans": [str(span)[:1000] for span in record.supporting_text_spans[:3]]} for record in workflow.evidence_records[:20]]}
+                    return {"evidence_count": len(workflow.evidence_records), "evidence": [{"pmid": record.pmid, "supporting_span_count": len(record.supporting_text_spans)} for record in workflow.evidence_records[:20]]}
                 if name == "validate":
-                    return {"citation_audit": workflow.trace_payload.get("citation_audit", {}), "cited_pmids": workflow.response.cited_pmids if workflow.response else []}
+                    return {"citation_audit": {"valid": bool(workflow.response and workflow.response.citations_valid), "precision": workflow.response.citation_precision if workflow.response else 0.0}, "cited_pmids": workflow.response.cited_pmids[:20] if workflow.response else []}
                 if name == "done":
                     return {"stop_reason": workflow.stop_reason}
                 return {}
@@ -683,6 +804,8 @@ class ResearchService:
                     raise
                 finally:
                     workflow = data["workflow"]
+                    if name == "retrieve" and workflow.technical_failure:
+                        status = "failed"
                     duration_ms = round((perf_counter() - started) * 1000, 2)
                     workflow.timings_ms.append(
                         {
@@ -739,6 +862,98 @@ class ResearchService:
             if request_id in self._traces:
                 self._traces[request_id] = completed.trace_payload
         return completed.response
+
+    def answer_from_evidence(
+        self,
+        query: str,
+        *,
+        candidates: Sequence[RetrievalCandidate],
+        evidence: Sequence[EvidenceRecord],
+        event_sink: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    ) -> ResearchResponse:
+        """Answer from supplied evidence only; re-run deterministic and semantic gates."""
+        request_id = str(uuid.uuid4())
+        try:
+            plan = self._build_plan(query)
+            records = list(evidence)
+            analysis = self._evidence_analyzer.analyze(records, plan)
+            grade = self._get_judge().judge(plan, list(candidates))
+            gaps = list(dict.fromkeys(
+                analysis["evidence_gaps"] + list(grade.missing_concepts)
+                + list(grade.missing_subquestions) + list(grade.conflicts)
+            ))
+            synthesis = self._get_synthesizer().synthesize(
+                query, records, gaps, insufficient=grade.grade != "SUFFICIENT"
+            )
+            text = synthesis.text
+            validator = getattr(self._get_synthesizer(), "validator", None)
+            audit = validator.validate(text, records) if validator is not None else synthesis.audit
+            semantic = getattr(self._get_synthesizer(), "semantic_verifier", None)
+            if audit.valid and semantic is not None and bool(getattr(semantic, "available", True)) and records:
+                verdicts = semantic.verify(text, records)
+                expected = len(_claims(text))
+                if len(verdicts) != expected or not all(item.supported for item in verdicts):
+                    kept = self._get_synthesizer()._verified_records(text, records, verdicts)
+                    records = kept
+                    text = self._get_synthesizer().deterministic_text(
+                        query, records, analysis["evidence_gaps"], grade.grade != "SUFFICIENT" or not records
+                    )
+                    audit = validator.validate(text, records)
+                    if records:
+                        final_verdicts = semantic.verify(text, records)
+                        if len(final_verdicts) != len(_claims(text)) or not all(item.supported for item in final_verdicts):
+                            records = self._get_synthesizer()._verified_records(text, records, final_verdicts)
+                            text = self._get_synthesizer().deterministic_text(query, records, analysis["evidence_gaps"], True)
+                            audit = validator.validate(text, records)
+            if not audit.valid:
+                text = "The available evidence could not be validated for a safe research answer."
+                records = []
+                audit = validator.validate(text, []) if validator is not None else synthesis.audit
+            if grade.grade == "SUFFICIENT" and audit.valid and audit.cited_pmids:
+                status = AnswerStatus.SUPPORTED
+            elif audit.valid and audit.cited_pmids and analysis["consensus_level"] != "conflicting" and not grade.conflicts:
+                status = AnswerStatus.LIMITED
+            else:
+                status = AnswerStatus.INSUFFICIENT
+            if event_sink:
+                released_claims = len(_claims(text)) if status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED} else 0
+                event_sink("claim_verified", {"claim_count": released_claims, "supported_count": released_claims})
+            response = ResearchResponse(
+                answer_status=status,
+                request_id=request_id,
+                query=query,
+                canonical_query=plan.canonical_query,
+                route=plan.route,
+                synthesis=text,
+                evidence_table=records,
+                cited_pmids=audit.cited_pmids,
+                citations_valid=audit.valid,
+                citation_precision=audit.precision,
+                consensus_level=analysis["consensus_level"],
+                evidence_gaps=gaps,
+                audit_trace_url=f"/trace/{request_id}",
+                retrieved_papers=list(candidates),
+            )
+            if event_sink:
+                event_sink("answer_released", {"status": status.value, "claim_count": len(audit.cited_pmids), "gap_count": len(response.evidence_gaps)})
+            return response
+        except Exception:
+            if event_sink:
+                event_sink("answer_released", {"status": AnswerStatus.FAILED.value, "claim_count": 0, "gap_count": 0})
+            return ResearchResponse(
+                answer_status=AnswerStatus.FAILED,
+                request_id=request_id,
+                query=query,
+                canonical_query=query,
+                route="SIMPLE",
+                synthesis="A technical failure prevented evidence validation.",
+                citations_valid=False,
+                citation_precision=0.0,
+                consensus_level="insufficient",
+                evidence_gaps=[],
+                audit_trace_url=f"/trace/{request_id}",
+                retrieved_papers=list(candidates),
+            )
 
     def get_trace(self, request_id: str) -> Optional[Dict[str, Any]]:
         with self._trace_lock:

@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from backend.app.evidence.extraction import EvidenceExtractor
-from backend.app.models.request_response import RetrievalCandidate
+from backend.app.models.request_response import AnswerStatus, EvidenceRecord, RetrievalCandidate
+from backend.app.conversation.models import CorrectiveResearchProposal, EvidenceGapContext
 from backend.app.query.models import PICOModel, QueryPlan
 from backend.app.query.query_service import QueryAnalysisService
 from backend.app.query.router import AdaptiveComplexityRouter
@@ -236,7 +237,7 @@ def test_initial_and_corrective_plans_cross_enhancer_before_router():
 
     class ObservedQueryAnalysis(QueryAnalysisService):
         def enhance_query(self, raw_query, **kwargs):
-            events.append(("enhance", raw_query))
+            events.append(("enhance", raw_query, kwargs.get("agent_rewrite")))
             return super().enhance_query(raw_query, **kwargs)
 
     analysis = ObservedQueryAnalysis(router=ObservedRouter())
@@ -247,9 +248,10 @@ def test_initial_and_corrective_plans_cross_enhancer_before_router():
 
     assert len([event for event in events if event[0] == "enhance"]) == 2
     assert len([event for event in events if event[0] == "route"]) == 2
-    assert [kind for kind, _ in events] == ["enhance", "route", "enhance", "route"]
+    assert [event[0] for event in events] == ["enhance", "route", "enhance", "route"]
     assert events[0][1] == "Empagliflozin diabetes kidney outcomes"
-    assert events[2][1] != events[0][1]
+    assert events[2][1] == events[0][1]
+    assert events[2][2] != events[0][2]
 
 
 def test_research_plan_forwards_agent_hint_and_prior_route_floor():
@@ -265,6 +267,196 @@ def test_research_plan_forwards_agent_hint_and_prior_route_floor():
     assert raised_by_hint.route_source == "agent_hint"
     assert raised_by_floor.route == "MODERATE"
     assert raised_by_floor.route_source == "route_floor"
+
+
+def test_agent_gap_proposal_reenters_enhancer_router_retrieval_judge_with_route_floor():
+    order = []
+    plans = []
+
+    class ObservedQueryAnalysis:
+        def build_query_plan(self, raw_query, user_filters=None, generate_embeddings=False, **kwargs):
+            order.append(("enhancer", raw_query))
+            order.append(("router", kwargs.get("route_floor"), kwargs.get("agent_complexity_hint"), user_filters))
+            plan = make_plan(original_query=raw_query, clean_query=raw_query, canonical_query=raw_query,
+                             route="COMPLEX" if kwargs.get("agent_complexity_hint") == "COMPLEX" else "SIMPLE")
+            plans.append(plan)
+            return plan, None
+
+    class ObservedHybrid(FakeHybrid):
+        def search(self, plan, top_k):
+            order.append(("retrieval", plan.original_query))
+            return super().search(plan, top_k)
+
+    class ObservedJudge:
+        def judge(self, plan, candidates):
+            order.append(("judge", plan.original_query))
+            return EvidenceGrade("PARTIAL", ["comparative safety"], {"unique_studies": len(candidates)}, "missing safety")
+
+    service = make_test_service(judge=ObservedJudge(), hybrid=ObservedHybrid())
+    service._query_analysis_service = ObservedQueryAnalysis()
+    reviewer_contexts = []
+
+    def reviewer(context):
+        order.append(("agent", context.standalone_question))
+        reviewer_contexts.append(context)
+        return CorrectiveResearchProposal(
+            standalone_query="Empagliflozin comparative safety outcomes",
+            complexity_hint="COMPLEX",
+        )
+
+    service.research(
+        "Empagliflozin diabetes kidney outcomes",
+        user_filters={"year_min": 2020},
+        max_loops=1,
+        route_floor="MODERATE",
+        gap_reviewer=reviewer,
+        request_id="agent-correction",
+    )
+
+    assert [item[0] for item in order] == [
+        "enhancer", "router", "retrieval", "judge",
+        "agent", "enhancer", "router", "retrieval", "judge",
+    ]
+    router_inputs = [item for item in order if item[0] == "router"]
+    assert [item[1] for item in router_inputs] == ["MODERATE", "MODERATE"]
+    assert router_inputs[1][2] == "COMPLEX"
+    assert router_inputs[1][3] == {"year_min": 2020}
+    assert reviewer_contexts[0].standalone_question == "Empagliflozin diabetes kidney outcomes"
+    assert reviewer_contexts[0].prior_queries == ["empagliflozin diabetes kidney outcomes"]
+    assert all(plan.original_query == "Empagliflozin diabetes kidney outcomes" for plan in plans)
+
+
+def test_answer_from_evidence_revalidates_claims_without_retrieval_and_sets_status():
+    service = make_test_service(judge=AlwaysSufficientJudge())
+    service._search_plan = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("retrieval called"))
+    evidence = EvidenceRecord(
+        pmid="12345", title="Study title", key_findings="Drug A reduced kidney disease progression.",
+        supporting_text_spans=["Drug A reduced kidney disease progression."],
+    )
+    candidate = make_candidate(pmid="12345")
+
+    response = service.answer_from_evidence(
+        "Drug A kidney outcomes",
+        candidates=[candidate], evidence=[evidence],
+    )
+
+    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert response.citations_valid is True
+    assert response.cited_pmids == ["12345"]
+
+
+def test_answer_from_evidence_with_no_safe_claim_is_insufficient():
+    service = make_test_service(judge=InsufficientJudge(), hybrid=EmptyHybrid())
+
+    response = service.answer_from_evidence("rare disease treatment", candidates=[], evidence=[])
+
+    assert response.answer_status == AnswerStatus.INSUFFICIENT
+    assert response.cited_pmids == []
+    assert "insufficient" in response.synthesis.casefold()
+
+
+def test_answer_from_evidence_releases_no_semantically_rejected_claim():
+    class RejectAllSemanticClaims:
+        available = True
+
+        def verify(self, synthesis, records):
+            from backend.app.models.request_response import ClaimVerification
+
+            return [ClaimVerification(claim_index=0, supported=False, supporting_pmids=[], rationale="not established")]
+
+    service = make_test_service(judge=AlwaysSufficientJudge())
+    synthesizer = EvidenceSynthesizer(semantic_verifier=RejectAllSemanticClaims())
+    service._synthesizer = synthesizer
+    evidence = EvidenceRecord(
+        pmid="12345", key_findings="Drug A reduced kidney disease progression.",
+        supporting_text_spans=["Drug A reduced kidney disease progression."],
+    )
+
+    response = service.answer_from_evidence(
+        "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
+    )
+
+    assert response.answer_status == AnswerStatus.INSUFFICIENT
+    assert response.cited_pmids == []
+    assert "insufficient" in response.synthesis.casefold()
+
+
+def test_failed_gap_reviewer_uses_deterministic_correction_and_maps_limited():
+    service = make_test_service()
+    contexts = []
+
+    def broken_reviewer(context):
+        contexts.append(context)
+        raise RuntimeError("agent unavailable")
+
+    response = service.research(
+        "Empagliflozin diabetes kidney outcomes", max_loops=1,
+        gap_reviewer=broken_reviewer, request_id="agent-fallback",
+    )
+    trace = service.get_trace("agent-fallback")
+    assert len(contexts) == 1
+    assert trace["correction_attempts"] == 1
+    assert trace["corrective_queries"][0] != "Empagliflozin diabetes kidney outcomes"
+    assert trace["stop_reason"] == "correction_budget_exhausted"
+    assert response.answer_status == AnswerStatus.LIMITED
+
+
+def test_normalized_duplicate_agent_query_is_rejected_and_summaries_stay_bounded():
+    service = make_test_service()
+    events = []
+    question = "Empagliflozin diabetes kidney outcomes"
+
+    response = service.research(
+        question,
+        max_loops=1,
+        gap_reviewer=lambda _context: CorrectiveResearchProposal(
+            standalone_query="  EMPAGLIFLOZIN   diabetes kidney outcomes ",
+            complexity_hint="SIMPLE",
+        ),
+        event_sink=lambda name, payload: events.append((name, payload)),
+        request_id="duplicate-agent-query",
+    )
+    trace = service.get_trace("duplicate-agent-query")
+
+    assert len(trace["corrective_queries"]) == 1
+    assert " ".join(trace["corrective_queries"][0].casefold().split()) != " ".join(question.casefold().split())
+    assert response.answer_status == AnswerStatus.LIMITED
+    assert {name for name, _ in events} >= {
+        "agent_decision", "query_enhanced", "route_arbitrated", "retrieval_attempt",
+        "evidence_judged", "answer_released",
+    }
+    assert all("supporting_text_spans" not in str(payload) for _, payload in events)
+
+
+def test_retrieval_provider_failure_is_failed_not_insufficient_evidence():
+    class BrokenHybrid(FakeHybrid):
+        def search(self, plan, top_k):
+            raise RuntimeError("database unavailable")
+
+    service = make_test_service(hybrid=BrokenHybrid())
+    response = service.research(
+        "Empagliflozin kidney outcomes", max_loops=1, request_id="retrieval-failure"
+    )
+    trace = service.get_trace("retrieval-failure")
+    assert response.answer_status == AnswerStatus.FAILED
+    assert "technical failure" in response.synthesis.casefold()
+    assert "insufficient" not in response.synthesis.casefold()
+    assert trace["stop_reason"] == "retrieval_failed"
+
+
+def test_unresolved_conflict_abstains_and_exposes_conflict_gap():
+    class ConflictingJudge:
+        def judge(self, plan, candidates):
+            return EvidenceGrade("PARTIAL", [], {}, "opposing findings", conflicts=["Studies report opposite effects."])
+
+    service = make_test_service(judge=ConflictingJudge())
+    response = service.research(
+        "Empagliflozin kidney outcomes", max_loops=2, request_id="conflicting-evidence"
+    )
+
+    assert response.answer_status == AnswerStatus.INSUFFICIENT
+    assert "Studies report opposite effects." in response.evidence_gaps
+    assert service.get_trace("conflicting-evidence")["stop_reason"] == "unresolved_conflict"
 
 
 def test_research_graph_routes_sufficient_evidence_directly_to_synthesis():
