@@ -70,7 +70,7 @@ def _public_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
 def _public_research_response(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Return only ordinary-user synthesis content, never diagnostics."""
     allowed = {
-        "request_id", "query", "synthesis", "cited_pmids",
+        "request_id", "query", "synthesis", "cited_pmids", "evidence_gaps",
     }
     result = {key: value for key, value in payload.items() if key in allowed}
     result["evidence_table"] = []

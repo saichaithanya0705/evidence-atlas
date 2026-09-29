@@ -352,8 +352,8 @@ def test_limited_research_explicitly_states_unresolved_question_and_gaps():
 
     assert response.answer_status == AnswerStatus.LIMITED
     assert "The full question was not established by the available evidence." in response.synthesis
-    assert "Evidence gaps:" in response.synthesis
-    assert "comparative safety" in response.synthesis
+    assert "Evidence gaps are listed separately in the response." in response.synthesis
+    assert "comparative safety" in response.evidence_gaps
 
 
 def test_limited_evidence_only_answer_explicitly_reports_unresolved_parts():
@@ -369,8 +369,8 @@ def test_limited_evidence_only_answer_explicitly_reports_unresolved_parts():
 
     assert response.answer_status == AnswerStatus.LIMITED
     assert "The full question was not established by the available evidence." in response.synthesis
-    assert "Evidence gaps:" in response.synthesis
-    assert "comparative safety" in response.synthesis
+    assert "Evidence gaps are listed separately in the response." in response.synthesis
+    assert "comparative safety" in response.evidence_gaps
 
 
 def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span_fallback():

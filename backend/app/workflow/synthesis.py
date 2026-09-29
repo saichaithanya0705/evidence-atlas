@@ -70,9 +70,10 @@ def _claims(text: str) -> List[str]:
             if not claim or claim.startswith("#"):
                 continue
             lowered = claim.casefold()
-            if lowered.rstrip(". ") == "the full question was not established by the available evidence":
-                continue
-            if lowered.startswith("evidence gaps:"):
+            if lowered.rstrip(". ") in {
+                "the full question was not established by the available evidence",
+                "evidence gaps are listed separately in the response",
+            }:
                 continue
             # Pure section labels are not factual claims.
             if claim.endswith(":") and len(claim.split()) <= 8:
@@ -368,9 +369,7 @@ class EvidenceSynthesizer:
                     ending = clean_span[len(body):] or "."
                     sections.append(f"{body} [PMID: {record.pmid}]{ending}")
         if gaps:
-            normalized_gaps = [gap.rstrip(" .") for gap in gaps if gap.strip()]
-            if normalized_gaps:
-                sections.append("Evidence gaps: " + "; ".join(normalized_gaps) + ".")
+            sections.append("Evidence gaps are listed separately in the response.")
         return "\n".join(sections)
 
     @staticmethod

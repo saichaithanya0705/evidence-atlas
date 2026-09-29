@@ -4,6 +4,7 @@ Comprehensive Pydantic models for API requests, responses, query plans,
 retrieval candidates, evidence records, and research workflows.
 Maintains exact compatibility with tests/e2e/e2e_contracts.py.
 """
+import re
 from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
@@ -109,6 +110,17 @@ class ClaimVerification(BaseModel):
     rationale: str = Field(max_length=300)
 
 
+def _sanitize_evidence_gaps(values: List[str]) -> List[str]:
+    normalized = []
+    seen = set()
+    for value in values[:20]:
+        gap = re.sub(r"\s+", " ", str(value or "")).strip()[:500]
+        if gap and gap.casefold() not in seen:
+            seen.add(gap.casefold())
+            normalized.append(gap)
+    return normalized
+
+
 class ResearchResponse(BaseModel):
     """Complete end-to-end response for an agentic literature synthesis request."""
     model_config = ConfigDict(extra="ignore")
@@ -129,6 +141,11 @@ class ResearchResponse(BaseModel):
     evidence_gaps: List[str] = Field(default_factory=list, description="Identified missing evidence or open questions")
     audit_trace_url: str = Field(..., description="URL or relative endpoint to inspect full execution trace")
     retrieved_papers: List[RetrievalCandidate] = Field(default_factory=list, description="Top ranked retrieved abstracts")
+
+    @field_validator("evidence_gaps")
+    @classmethod
+    def sanitize_gaps(cls, values: List[str]) -> List[str]:
+        return _sanitize_evidence_gaps(values)
 
 
 class PublicSearchCandidate(BaseModel):
@@ -178,6 +195,12 @@ class PublicResearchResponse(BaseModel):
     query: str
     synthesis: str
     evidence_table: List[PublicEvidenceRecord] = Field(default_factory=list)
+    evidence_gaps: List[str] = Field(default_factory=list)
+
+    @field_validator("evidence_gaps")
+    @classmethod
+    def sanitize_gaps(cls, values: List[str]) -> List[str]:
+        return _sanitize_evidence_gaps(values)
 
 
 class AdminVerifyResponse(BaseModel):

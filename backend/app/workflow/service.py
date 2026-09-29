@@ -84,27 +84,22 @@ class _GraphInput(TypedDict):
     evidence_limit: int
 
 
-def _limited_answer_text(text: str, gaps: Sequence[str]) -> str:
-    """Attach bounded non-claim release metadata to a LIMITED answer."""
+_LIMITED_CAVEAT = "The full question was not established by the available evidence."
+_LIMITED_GAP_NOTICE = "Evidence gaps are listed separately in the response."
+
+
+def _limited_answer_text(text: str) -> str:
+    """Attach fixed non-claim metadata to a LIMITED answer."""
     body_lines = [
         line for line in (text or "").splitlines()
-        if not line.strip().casefold().startswith("evidence gaps:")
-        and line.strip().casefold().rstrip(". ")
-        != "the full question was not established by the available evidence"
+        if line.strip().casefold().rstrip(". ") not in {
+            _LIMITED_CAVEAT.casefold().rstrip(". "),
+            _LIMITED_GAP_NOTICE.casefold().rstrip(". "),
+        }
     ]
-    summary = []
-    for gap in gaps:
-        normalized = re.sub(r"\s+", " ", str(gap)).strip()
-        if normalized:
-            summary.append(normalized[:200])
-        if len(summary) == 8:
-            break
-    if not summary:
-        summary = ["The available evidence did not establish every requested part"]
-    gap_line = "Evidence gaps: " + "; ".join(summary)
     return "\n".join(
         [line for line in body_lines if line.strip()]
-        + ["The full question was not established by the available evidence.", gap_line]
+        + [_LIMITED_CAVEAT, _LIMITED_GAP_NOTICE]
     )
 
 
@@ -771,7 +766,7 @@ class ResearchService:
 
             synthesizer = self._get_synthesizer()
             if answer_status == AnswerStatus.LIMITED:
-                response_text = _limited_answer_text(response_text, response_gaps)
+                response_text = _limited_answer_text(response_text)
             if answer_status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED}:
                 release_valid, final_audit = _validate_release_text(
                     response_text, workflow.evidence_records, synthesizer
@@ -784,8 +779,7 @@ class ResearchService:
                 else:
                     answer_status = AnswerStatus.INSUFFICIENT
                     response_text = _limited_answer_text(
-                        "The available retrieved evidence is insufficient to provide a validated research summary.",
-                        response_gaps,
+                        "The available retrieved evidence is insufficient to provide a validated research summary."
                     )
                     citations = []
                     audit_valid = True
@@ -1011,7 +1005,7 @@ class ResearchService:
             else:
                 status = AnswerStatus.INSUFFICIENT
             if status == AnswerStatus.LIMITED:
-                text = _limited_answer_text(text, gaps)
+                text = _limited_answer_text(text)
             if status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED}:
                 release_valid, final_audit = _validate_release_text(text, records, synthesizer)
                 if release_valid and final_audit is not None:
@@ -1019,7 +1013,7 @@ class ResearchService:
                 else:
                     status = AnswerStatus.INSUFFICIENT
                     text = _limited_answer_text(
-                        "The available evidence is insufficient to provide a validated research answer.", gaps
+                        "The available evidence is insufficient to provide a validated research answer."
                     )
                     audit = validator.validate(text, []) if validator is not None else synthesis.audit
             if event_sink:

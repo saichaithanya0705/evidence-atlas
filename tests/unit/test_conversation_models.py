@@ -19,7 +19,7 @@ from backend.app.conversation.models import (
     EvidenceGapContext,
 )
 from backend.app.core.config import Settings
-from backend.app.models.request_response import ResearchResponse
+from backend.app.models.request_response import PublicResearchResponse, ResearchResponse
 
 
 def test_all_agent_actions_accept_only_their_required_contract():
@@ -107,6 +107,21 @@ def test_research_response_defaults_to_supported_without_breaking_old_payloads()
     )
     assert response.answer_status is AnswerStatus.SUPPORTED
     assert response.model_dump(mode="json")["answer_status"] == "SUPPORTED"
+    assert response.evidence_gaps == []
+
+
+def test_research_response_sanitizes_and_bounds_structured_evidence_gaps():
+    response = ResearchResponse(
+        request_id="req-gaps", query="q", canonical_query="q", route="SIMPLE", synthesis="s",
+        citations_valid=True, citation_precision=1.0, audit_trace_url="/audit/req-gaps",
+        evidence_gaps=["  Missing   safety evidence  ", "x" * 900] + [f"gap {i}" for i in range(25)],
+    )
+
+    assert response.evidence_gaps[0] == "Missing safety evidence"
+    assert len(response.evidence_gaps) <= 20
+    assert all(len(gap) <= 500 for gap in response.evidence_gaps)
+    public_response = PublicResearchResponse(query="q", synthesis="s", evidence_gaps=response.evidence_gaps)
+    assert public_response.model_dump(mode="json")["evidence_gaps"] == response.evidence_gaps
 
 
 def test_conversation_response_types_validate_and_serialize_public_contracts():

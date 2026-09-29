@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import EvidenceRecord, RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
@@ -163,16 +165,34 @@ def test_limited_metadata_is_not_a_claim_but_real_claims_remain_validated():
     record = _record(span)
     metadata = (
         "The full question was not established by the available evidence.\n"
-        "Evidence gaps: comparative safety; long-term outcomes."
+        "Evidence gaps are listed separately in the response."
     )
     grounded = f"{span} [PMID: 12345]\n{metadata}"
     unsupported = f"Drug A cured every patient [PMID: 12345]\n{metadata}"
     caveat_with_claim = "The full question was not established by the available evidence. Drug A cured every patient [PMID: 12345]"
+    gap_notice_with_claim = "Evidence gaps are listed separately in the response. Drug A cured every patient [PMID: 12345]"
+    arbitrary_gap_prefix = "Evidence gaps: Drug A cured every patient [PMID: 12345]"
 
     assert _claims(grounded) == ["Drug A reduced kidney disease progression. [PMID: 12345]"]
     assert ClaimToSpanValidator().validate(grounded, [record]).valid
     assert not ClaimToSpanValidator().validate(unsupported, [record]).valid
     assert not ClaimToSpanValidator().validate(caveat_with_claim, [record]).valid
+    assert not ClaimToSpanValidator().validate(gap_notice_with_claim, [record]).valid
+    assert not ClaimToSpanValidator().validate(arbitrary_gap_prefix, [record]).valid
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The full question was not established by the available evidence. Drug A cured every patient [PMID: 12345]",
+        "Evidence gaps: Drug A cured every patient [PMID: 12345]",
+    ],
+)
+def test_arbitrary_text_appended_to_metadata_prefix_remains_a_validated_claim(text):
+    record = _record("Drug A reduced kidney disease progression.")
+
+    assert _claims(text) == [text]
+    assert not ClaimToSpanValidator().validate(text, [record]).valid
 
 
 def test_nim_span_selection_is_validated_and_rendered_from_source():
