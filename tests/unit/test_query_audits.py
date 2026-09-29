@@ -140,6 +140,18 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
     audits.finish("linked-trace", "completed", {
         "answer_status": "SUPPORTED", "evidence_gaps": ["  missing   pediatric evidence  "],
         "provider_output": "private provider text", "prompt": "hidden system prompt",
+        "evidence_table": [
+            {"pmid": "12345", "title": True, "year": "2024", "population": False,
+             "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+            {"pmid": "23456", "title": "Valid title", "year": 2020, "population": "Adults",
+             "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+        ],
+        "retrieved_papers": [
+            {"pmid": 12345, "title": False, "year": "2024", "abstract": "Valid abstract",
+             "journal": 7, "authors": ["Valid Author", {"prompt": "nested author secret"}], "study_type": "Review"},
+            {"pmid": "23456", "title": "Valid title", "year": 2020, "abstract": "Valid abstract",
+             "journal": "Valid Journal", "authors": ["Valid Author"], "study_type": "Review"},
+        ],
     }, {
         "query_plan": {"pico": {"population": "sensitive"}, "router_reasoning": "hidden"},
         "citation_audit": {"valid": True, "cited_pmids": ["12345", {"provider_output": "nested citation secret"}]},
@@ -165,12 +177,22 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
     assert detail["requested_controls"] == {"study_types": ["Review"]}
     assert detail["applied_controls"] == {}
     assert detail["trace"]["citation_audit"]["cited_pmids"] == ["12345"]
+    assert detail["response"]["evidence_table"] == [
+        {"pmid": "12345", "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+        {"pmid": "23456", "title": "Valid title", "year": 2020, "population": "Adults",
+         "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+    ]
+    assert detail["response"]["retrieved_papers"] == [
+        {"abstract": "Valid abstract", "authors": ["Valid Author"], "study_type": "Review"},
+        {"pmid": "23456", "title": "Valid title", "year": 2020, "abstract": "Valid abstract",
+         "journal": "Valid Journal", "authors": ["Valid Author"], "study_type": "Review"},
+    ]
     assert "reason" not in next(event["payload"] for event in detail["events"] if event["stage"] == "correction_stopped")
     assert [event["stage"] for event in detail["events"]] == [
         "agent_decision", "query_analysis", "correct", "claim_verified", "answer_released", "correction_stopped",
     ]
     assert "pico" not in str(detail)
-    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary", "nested event secret", "nested citation secret", "nested control secret"):
+    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary", "nested event secret", "nested citation secret", "nested control secret", "nested author secret"):
         assert unsafe not in str(detail)
     legacy_trace = client.get("/trace/linked-trace", headers=headers).json()
     assert "pico" not in str(legacy_trace)

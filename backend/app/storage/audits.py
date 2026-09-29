@@ -27,8 +27,6 @@ _EVENT_FIELDS = {
     "done": {"status", "duration_ms", "stop_reason"},
 }
 _RESPONSE_FIELDS = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps", "evidence_table", "retrieved_papers", "citations_valid", "citation_precision", "consensus_level", "route", "answer_status"}
-_EVIDENCE_FIELDS = {"pmid", "title", "year", "study_design", "population", "intervention", "comparator", "outcome", "key_findings", "limitations", "supporting_text_spans"}
-_PAPER_FIELDS = {"pmid", "title", "abstract", "journal", "year", "authors", "mesh_terms", "study_type"}
 _TRACE_FIELDS = {"valid", "citations_valid", "precision", "citation_precision", "cited_pmids", "invalid_pmids"}
 _TIMING_FIELDS = {"total", "total_ms", "duration_ms", "query_analysis", "retrieval", "judge", "evidence", "synthesis", "validation"}
 _ROUTES = {"SIMPLE", "MODERATE", "COMPLEX"}
@@ -91,16 +89,45 @@ def _safe_controls(value):
     return result
 
 
+def _safe_text(value, limit):
+    return value[:limit] if isinstance(value, str) and value.strip() else None
+
+
+def _safe_year(value):
+    return value if type(value) is int and 0 <= value <= 3000 else None
+
+
 def _safe_evidence(value):
-    result = _safe_mapping(value, _EVIDENCE_FIELDS)
-    spans = value.get("supporting_text_spans")
-    if isinstance(spans, list):
-        result["supporting_text_spans"] = _safe_string_list(spans, limit=20, item_limit=1000)
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    pmid = value.get("pmid")
+    if isinstance(pmid, str) and pmid.isdigit():
+        result["pmid"] = pmid[:20]
+    if (year := _safe_year(value.get("year"))) is not None:
+        result["year"] = year
+    text_fields = {
+        "title": 500, "study_design": 500, "population": 1000,
+        "intervention": 1000, "comparator": 1000, "outcome": 1000,
+        "key_findings": 4000, "limitations": 2000,
+    }
+    result.update({key: text for key, limit in text_fields.items() if (text := _safe_text(value.get(key), limit)) is not None})
+    if isinstance(value.get("supporting_text_spans"), list):
+        result["supporting_text_spans"] = _safe_string_list(value["supporting_text_spans"], limit=20, item_limit=1000)
     return result
 
 
 def _safe_paper(value):
-    result = _safe_mapping(value, _PAPER_FIELDS)
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    pmid = value.get("pmid")
+    if isinstance(pmid, str) and pmid.isdigit():
+        result["pmid"] = pmid[:20]
+    if (year := _safe_year(value.get("year"))) is not None:
+        result["year"] = year
+    text_fields = {"title": 500, "abstract": 10000, "journal": 500, "study_type": 160}
+    result.update({key: text for key, limit in text_fields.items() if (text := _safe_text(value.get(key), limit)) is not None})
     for key in ("authors", "mesh_terms"):
         if isinstance(value.get(key), list):
             result[key] = _safe_string_list(value[key], limit=30, item_limit=160)
