@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import EvidenceRecord, RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
-from backend.app.workflow.synthesis import ClaimToSpanValidator, EvidenceSynthesizer
+from backend.app.workflow.synthesis import ClaimToSpanValidator, EvidenceSynthesizer, _claims
 
 
 def _record(span: str, *, year: int | None = None) -> EvidenceRecord:
@@ -156,6 +156,23 @@ def test_no_evidence_skips_model_call_and_returns_valid_abstention():
     assert result.audit.valid
     assert result.audit.cited_pmids == []
     assert result.timings_ms["generation"] == 0.0
+
+
+def test_limited_metadata_is_not_a_claim_but_real_claims_remain_validated():
+    span = "Drug A reduced kidney disease progression."
+    record = _record(span)
+    metadata = (
+        "The full question was not established by the available evidence.\n"
+        "Evidence gaps: comparative safety; long-term outcomes."
+    )
+    grounded = f"{span} [PMID: 12345]\n{metadata}"
+    unsupported = f"Drug A cured every patient [PMID: 12345]\n{metadata}"
+    caveat_with_claim = "The full question was not established by the available evidence. Drug A cured every patient [PMID: 12345]"
+
+    assert _claims(grounded) == ["Drug A reduced kidney disease progression. [PMID: 12345]"]
+    assert ClaimToSpanValidator().validate(grounded, [record]).valid
+    assert not ClaimToSpanValidator().validate(unsupported, [record]).valid
+    assert not ClaimToSpanValidator().validate(caveat_with_claim, [record]).valid
 
 
 def test_nim_span_selection_is_validated_and_rendered_from_source():

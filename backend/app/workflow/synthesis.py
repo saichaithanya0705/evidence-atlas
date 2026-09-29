@@ -69,6 +69,11 @@ def _claims(text: str) -> List[str]:
             claim = raw.strip(" \t\r\n-*#")
             if not claim or claim.startswith("#"):
                 continue
+            lowered = claim.casefold()
+            if lowered.rstrip(". ") == "the full question was not established by the available evidence":
+                continue
+            if lowered.startswith("evidence gaps:"):
+                continue
             # Pure section labels are not factual claims.
             if claim.endswith(":") and len(claim.split()) <= 8:
                 continue

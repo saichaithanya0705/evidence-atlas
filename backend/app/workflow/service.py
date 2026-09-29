@@ -84,6 +84,55 @@ class _GraphInput(TypedDict):
     evidence_limit: int
 
 
+def _limited_answer_text(text: str, gaps: Sequence[str]) -> str:
+    """Attach bounded non-claim release metadata to a LIMITED answer."""
+    body_lines = [
+        line for line in (text or "").splitlines()
+        if not line.strip().casefold().startswith("evidence gaps:")
+        and line.strip().casefold().rstrip(". ")
+        != "the full question was not established by the available evidence"
+    ]
+    summary = []
+    for gap in gaps:
+        normalized = re.sub(r"\s+", " ", str(gap)).strip()
+        if normalized:
+            summary.append(normalized[:200])
+        if len(summary) == 8:
+            break
+    if not summary:
+        summary = ["The available evidence did not establish every requested part"]
+    gap_line = "Evidence gaps: " + "; ".join(summary)
+    return "\n".join(
+        [line for line in body_lines if line.strip()]
+        + ["The full question was not established by the available evidence.", gap_line]
+    )
+
+
+def _validate_release_text(text: str, records: Sequence[EvidenceRecord], synthesizer: Any) -> Tuple[bool, Any]:
+    """Recheck actual claims after release metadata has been attached."""
+    validator = getattr(synthesizer, "validator", None)
+    if validator is None:
+        return False, None
+    audit = validator.validate(text, records)
+    if not audit.valid:
+        return False, audit
+    claims = _claims(text)
+    if not claims:
+        return True, audit
+    semantic = getattr(synthesizer, "semantic_verifier", None)
+    available = bool(getattr(semantic, "available", False)) if semantic is not None else False
+    if available:
+        try:
+            verdicts = semantic.verify(text, records)
+        except Exception:
+            return False, audit
+        return len(verdicts) == len(claims) and all(item.supported for item in verdicts), audit
+    exact_check = getattr(synthesizer, "_is_exact_span_text", None)
+    if not callable(exact_check) or not exact_check(text, records):
+        return False, audit
+    return True, audit
+
+
 class ResearchService:
     """Coordinate query understanding, hybrid search, CRAG, and citation gates.
 
@@ -703,6 +752,50 @@ class ResearchService:
                 audit_dict = synthesis.audit.to_dict()
                 if workflow.stop_reason is None:
                     workflow.stop_reason = "completed"
+            response_gaps = [] if workflow.technical_failure else list(dict.fromkeys(
+                workflow.analysis["evidence_gaps"]
+                + (workflow.grade.missing_concepts if workflow.grade else [])
+                + (workflow.grade.missing_subquestions if workflow.grade else [])
+                + (workflow.grade.conflicts if workflow.grade else [])
+            ))
+            if workflow.technical_failure:
+                answer_status = AnswerStatus.FAILED
+            elif workflow.analysis["consensus_level"] == "conflicting" or (workflow.grade and workflow.grade.conflicts):
+                answer_status = AnswerStatus.INSUFFICIENT
+            elif workflow.grade and workflow.grade.grade == "SUFFICIENT" and synthesis.audit.valid and synthesis.audit.cited_pmids:
+                answer_status = AnswerStatus.SUPPORTED
+            elif synthesis.audit.valid and synthesis.audit.cited_pmids:
+                answer_status = AnswerStatus.LIMITED
+            else:
+                answer_status = AnswerStatus.INSUFFICIENT
+
+            synthesizer = self._get_synthesizer()
+            if answer_status == AnswerStatus.LIMITED:
+                response_text = _limited_answer_text(response_text, response_gaps)
+            if answer_status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED}:
+                release_valid, final_audit = _validate_release_text(
+                    response_text, workflow.evidence_records, synthesizer
+                )
+                if release_valid and final_audit is not None:
+                    citations = final_audit.cited_pmids
+                    precision = final_audit.precision
+                    audit_valid = True
+                    audit_dict = final_audit.to_dict()
+                else:
+                    answer_status = AnswerStatus.INSUFFICIENT
+                    response_text = _limited_answer_text(
+                        "The available retrieved evidence is insufficient to provide a validated research summary.",
+                        response_gaps,
+                    )
+                    citations = []
+                    audit_valid = True
+                    precision = 1.0
+                    audit_dict = {
+                        "valid": False,
+                        "final_response_fail_closed": True,
+                        "cited_pmids": [],
+                        "citation_precision": 1.0,
+                    }
             workflow.stages.append(
                 {
                     "stage": "citation_verification",
@@ -713,13 +806,7 @@ class ResearchService:
                 }
             )
             workflow.response = ResearchResponse(
-                answer_status=(
-                    AnswerStatus.FAILED if workflow.technical_failure
-                    else AnswerStatus.INSUFFICIENT if workflow.analysis["consensus_level"] == "conflicting" or (workflow.grade and workflow.grade.conflicts)
-                    else AnswerStatus.SUPPORTED if workflow.grade and workflow.grade.grade == "SUFFICIENT" and synthesis.audit.valid and synthesis.audit.cited_pmids
-                    else AnswerStatus.LIMITED if synthesis.audit.valid and synthesis.audit.cited_pmids and workflow.analysis["consensus_level"] != "conflicting"
-                    else AnswerStatus.INSUFFICIENT
-                ),
+                answer_status=answer_status,
                 request_id=request_id,
                 query=query,
                 canonical_query=workflow.initial_plan.canonical_query,
@@ -730,16 +817,13 @@ class ResearchService:
                 citations_valid=audit_valid,
                 citation_precision=precision,
                 consensus_level=workflow.analysis["consensus_level"],
-                evidence_gaps=([] if workflow.technical_failure else list(dict.fromkeys(
-                    workflow.analysis["evidence_gaps"]
-                    + (workflow.grade.missing_concepts if workflow.grade else [])
-                    + (workflow.grade.missing_subquestions if workflow.grade else [])
-                    + (workflow.grade.conflicts if workflow.grade else [])
-                ))),
+                evidence_gaps=response_gaps,
                 audit_trace_url=f"/trace/{request_id}",
                 retrieved_papers=workflow.ranked_candidates,
             )
             if workflow.event_sink:
+                released_claims = len(_claims(response_text)) if audit_valid and citations else 0
+                workflow.event_sink("claim_verified", {"claim_count": released_claims, "supported_count": released_claims})
                 workflow.event_sink("answer_released", {"status": workflow.response.answer_status.value, "claim_count": len(workflow.response.cited_pmids), "gap_count": len(workflow.response.evidence_gaps)})
             insufficient = not workflow.grade or workflow.grade.grade != "SUFFICIENT"
             workflow.trace_payload = {
@@ -882,28 +966,39 @@ class ResearchService:
                 analysis["evidence_gaps"] + list(grade.missing_concepts)
                 + list(grade.missing_subquestions) + list(grade.conflicts)
             ))
-            synthesis = self._get_synthesizer().synthesize(
+            synthesizer = self._get_synthesizer()
+            synthesis = synthesizer.synthesize(
                 query, records, gaps, insufficient=grade.grade != "SUFFICIENT"
             )
             text = synthesis.text
-            validator = getattr(self._get_synthesizer(), "validator", None)
+            validator = getattr(synthesizer, "validator", None)
             audit = validator.validate(text, records) if validator is not None else synthesis.audit
-            semantic = getattr(self._get_synthesizer(), "semantic_verifier", None)
+            semantic = getattr(synthesizer, "semantic_verifier", None)
+            semantic_available = bool(getattr(semantic, "available", False)) if semantic is not None else False
+            exact_check = getattr(synthesizer, "_is_exact_span_text", None)
+            if (
+                audit.valid and records and _claims(text) and not semantic_available
+                and (not callable(exact_check) or not exact_check(text, records))
+            ):
+                text = synthesizer.deterministic_text(
+                    query, records, gaps, grade.grade != "SUFFICIENT"
+                )
+                audit = validator.validate(text, records)
             if audit.valid and semantic is not None and bool(getattr(semantic, "available", True)) and records:
                 verdicts = semantic.verify(text, records)
                 expected = len(_claims(text))
                 if len(verdicts) != expected or not all(item.supported for item in verdicts):
-                    kept = self._get_synthesizer()._verified_records(text, records, verdicts)
+                    kept = synthesizer._verified_records(text, records, verdicts)
                     records = kept
-                    text = self._get_synthesizer().deterministic_text(
-                        query, records, analysis["evidence_gaps"], grade.grade != "SUFFICIENT" or not records
+                    text = synthesizer.deterministic_text(
+                        query, records, gaps, grade.grade != "SUFFICIENT" or not records
                     )
                     audit = validator.validate(text, records)
                     if records:
                         final_verdicts = semantic.verify(text, records)
                         if len(final_verdicts) != len(_claims(text)) or not all(item.supported for item in final_verdicts):
-                            records = self._get_synthesizer()._verified_records(text, records, final_verdicts)
-                            text = self._get_synthesizer().deterministic_text(query, records, analysis["evidence_gaps"], True)
+                            records = synthesizer._verified_records(text, records, final_verdicts)
+                            text = synthesizer.deterministic_text(query, records, gaps, True)
                             audit = validator.validate(text, records)
             if not audit.valid:
                 text = "The available evidence could not be validated for a safe research answer."
@@ -915,6 +1010,18 @@ class ResearchService:
                 status = AnswerStatus.LIMITED
             else:
                 status = AnswerStatus.INSUFFICIENT
+            if status == AnswerStatus.LIMITED:
+                text = _limited_answer_text(text, gaps)
+            if status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED}:
+                release_valid, final_audit = _validate_release_text(text, records, synthesizer)
+                if release_valid and final_audit is not None:
+                    audit = final_audit
+                else:
+                    status = AnswerStatus.INSUFFICIENT
+                    text = _limited_answer_text(
+                        "The available evidence is insufficient to provide a validated research answer.", gaps
+                    )
+                    audit = validator.validate(text, []) if validator is not None else synthesis.audit
             if event_sink:
                 released_claims = len(_claims(text)) if status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED} else 0
                 event_sink("claim_verified", {"claim_count": released_claims, "supported_count": released_claims})

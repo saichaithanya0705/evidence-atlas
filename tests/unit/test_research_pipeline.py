@@ -13,7 +13,7 @@ from backend.app.retrieval.hybrid import HybridRetriever, reciprocal_rank_fusion
 from backend.app.retrieval.reranker import MedCPTReranker
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
 from backend.app.workflow.service import ResearchService
-from backend.app.workflow.synthesis import EvidenceSynthesizer
+from backend.app.workflow.synthesis import EvidenceSynthesizer, SynthesisResult
 
 
 def make_plan(**kwargs):
@@ -345,6 +345,75 @@ def test_answer_from_evidence_revalidates_claims_without_retrieval_and_sets_stat
     assert response.cited_pmids == ["12345"]
 
 
+def test_limited_research_explicitly_states_unresolved_question_and_gaps():
+    response = make_test_service().research(
+        "Empagliflozin diabetes kidney outcomes", max_loops=0, request_id="limited-caveat"
+    )
+
+    assert response.answer_status == AnswerStatus.LIMITED
+    assert "The full question was not established by the available evidence." in response.synthesis
+    assert "Evidence gaps:" in response.synthesis
+    assert "comparative safety" in response.synthesis
+
+
+def test_limited_evidence_only_answer_explicitly_reports_unresolved_parts():
+    service = make_test_service(judge=AlwaysPartialJudge())
+    evidence = EvidenceRecord(
+        pmid="12345", key_findings="Drug A reduced kidney disease progression.",
+        supporting_text_spans=["Drug A reduced kidney disease progression."],
+    )
+
+    response = service.answer_from_evidence(
+        "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
+    )
+
+    assert response.answer_status == AnswerStatus.LIMITED
+    assert "The full question was not established by the available evidence." in response.synthesis
+    assert "Evidence gaps:" in response.synthesis
+    assert "comparative safety" in response.synthesis
+
+
+def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span_fallback():
+    source_span = "Drug A reduced kidney disease progression among adults with diabetes."
+    generated_claim = "Drug A reduced kidney disease progression [PMID: 12345]."
+
+    class UnverifiedGeneratedSynthesizer(EvidenceSynthesizer):
+        def synthesize(self, query, records, gaps, insufficient=False):
+            audit = self.validator.validate(generated_claim, records)
+            assert audit.valid
+            return SynthesisResult(generated_claim, "nvidia_nim", None, audit)
+
+    service = make_test_service(judge=AlwaysSufficientJudge())
+    service._synthesizer = UnverifiedGeneratedSynthesizer(semantic_verifier=None)
+    evidence = EvidenceRecord(
+        pmid="12345", key_findings=source_span, supporting_text_spans=[source_span]
+    )
+
+    response = service.answer_from_evidence(
+        "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
+    )
+
+    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert generated_claim not in response.synthesis
+    assert f"{source_span[:-1]} [PMID: 12345]." in response.synthesis
+
+
+def test_evidence_only_exact_span_fallback_is_supported_without_semantic_service():
+    source_span = "Drug A reduced kidney disease progression among adults with diabetes."
+    service = make_test_service(judge=AlwaysSufficientJudge())
+    service._synthesizer = EvidenceSynthesizer(semantic_verifier=None)
+    evidence = EvidenceRecord(
+        pmid="12345", key_findings=source_span, supporting_text_spans=[source_span]
+    )
+
+    response = service.answer_from_evidence(
+        "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
+    )
+
+    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert f"{source_span[:-1]} [PMID: 12345]." in response.synthesis
+
+
 def test_answer_from_evidence_with_no_safe_claim_is_insufficient():
     service = make_test_service(judge=InsufficientJudge(), hybrid=EmptyHybrid())
 
@@ -426,6 +495,28 @@ def test_normalized_duplicate_agent_query_is_rejected_and_summaries_stay_bounded
         "evidence_judged", "answer_released",
     }
     assert all("supporting_text_spans" not in str(payload) for _, payload in events)
+
+
+def test_research_emits_claim_verification_summary_before_release():
+    service = make_test_service(judge=AlwaysSufficientJudge())
+    events = []
+    raw_claim = "Among patients with type 2 diabetes and chronic kidney disease, empagliflozin reduced progression of kidney disease compared with placebo."
+
+    service.research(
+        "Empagliflozin diabetes kidney outcomes", max_loops=0,
+        event_sink=lambda name, payload: events.append((name, payload)),
+        request_id="claim-verification-event",
+    )
+
+    names = [name for name, _ in events]
+    verified_index = names.index("claim_verified")
+    release_index = names.index("answer_released")
+    assert verified_index < release_index
+    verified = events[verified_index][1]
+    assert set(verified) == {"claim_count", "supported_count"}
+    assert verified["claim_count"] == verified["supported_count"] >= 1
+    assert raw_claim not in str(events)
+    assert "supporting_text_spans" not in str(events)
 
 
 def test_retrieval_provider_failure_is_failed_not_insufficient_evidence():
