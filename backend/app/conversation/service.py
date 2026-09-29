@@ -36,7 +36,7 @@ _PUBLIC_CANDIDATE_FIELDS = {
 }
 _PUBLIC_EVIDENCE_FIELDS = {
     "pmid", "title", "year", "study_design", "population", "intervention", "comparator",
-    "outcome", "key_findings", "limitations", "supporting_text_spans",
+    "outcome", "key_findings", "limitations", "supporting_text_spans", "subquestion_ids",
 }
 
 
@@ -52,7 +52,18 @@ def public_research_projection(payload: Any) -> dict[str, Any]:
     result["evidence_table"] = []
     for row in source.get("evidence_table", []):
         value = row.model_dump(mode="json") if hasattr(row, "model_dump") else dict(row)
-        result["evidence_table"].append({key: item for key, item in value.items() if key in _PUBLIC_EVIDENCE_FIELDS})
+        public_row = {key: item for key, item in value.items() if key in _PUBLIC_EVIDENCE_FIELDS}
+        provenance = value.get("retrieval_provenance")
+        if isinstance(provenance, dict):
+            channels = []
+            for field in ("channel_ranks", "channel_scores"):
+                mapping = provenance.get(field)
+                if isinstance(mapping, dict):
+                    channels.extend(key for key in mapping if isinstance(key, str) and key.strip())
+            public_row["retrieval_channels"] = list(dict.fromkeys(channels))
+        else:
+            public_row["retrieval_channels"] = []
+        result["evidence_table"].append(public_row)
     result["retrieved_papers"] = [
         {key: value for key, value in (item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)).items()
          if key in _PUBLIC_CANDIDATE_FIELDS}

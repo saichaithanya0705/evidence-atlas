@@ -43,7 +43,17 @@ class _Research:
             "canonical_query": "diabetes",
             "route": "SIMPLE",
             "synthesis": "Evidence supports the outcome [PMID: 12345].",
-            "evidence_table": [{"pmid": "12345", "title": "Trial", "key_findings": "Result", "supporting_text_spans": ["Exact span"], "admin_only": "secret"}],
+            "evidence_table": [{
+                "pmid": "12345", "title": "Trial", "key_findings": "Result",
+                "supporting_text_spans": ["Exact span"], "admin_only": "secret",
+                "retrieval_provenance": {
+                    "channel_ranks": {"bm25": 1}, "channel_scores": {"bm25": 8.2},
+                    "graph_path": ["secret graph"], "rrf_score": 0.04,
+                    "filter_satisfied": True, "retrieval_iteration": 2,
+                },
+                "reranker_score": 0.91, "reranker_mode": "medcpt",
+                "subquestion_ids": ["sq-1"],
+            }],
             "cited_pmids": ["12345"],
             "citations_valid": True,
             "citation_precision": 1.0,
@@ -90,6 +100,11 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert (run["conversation_id"], run["turn_id"], run["status"]) == (conversation["id"], turn["id"], "completed")
     public = json.loads(turn["public_response_json"])
     assert public["evidence_table"][0]["supporting_text_spans"] == ["Exact span"]
+    assert public["evidence_table"][0]["retrieval_channels"] == ["bm25"]
+    assert public["evidence_table"][0]["subquestion_ids"] == ["sq-1"]
+    assert not {
+        "retrieval_provenance", "reranker_score", "reranker_mode"
+    } & public["evidence_table"][0].keys()
     assert "admin_only" not in public["evidence_table"][0]
     assert "rrf_score" not in public["retrieved_papers"][0]
     assert not {"audit_trace_url", "canonical_query", "route", "citation_precision", "raw_prompt", "model_output", "internal_trace"} & public.keys()
@@ -102,6 +117,7 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     restored_json = restored.model_dump(mode="json")
     assert "rrf_score" not in restored_json["retrieved_papers"][0]
     assert "admin_only" not in restored_json["evidence_table"][0]
+    assert restored_json["evidence_table"][0]["retrieval_channels"] == ["bm25"]
     assert not {"request_id", "raw_prompt", "internal_trace", "audit_trace_url"} & restored_json.keys()
 
 

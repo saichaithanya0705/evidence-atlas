@@ -3,6 +3,7 @@
 from datetime import datetime
 import json
 import math
+import re
 
 from .database import connect_db, utc_now
 
@@ -114,6 +115,48 @@ def _safe_evidence(value):
     result.update({key: text for key, limit in text_fields.items() if (text := _safe_text(value.get(key), limit)) is not None})
     if isinstance(value.get("supporting_text_spans"), list):
         result["supporting_text_spans"] = _safe_string_list(value["supporting_text_spans"], limit=20, item_limit=1000)
+    provenance = _safe_retrieval_provenance(value.get("retrieval_provenance"))
+    if provenance:
+        result["retrieval_provenance"] = provenance
+    reranker_score = value.get("reranker_score")
+    if type(reranker_score) in {int, float} and math.isfinite(reranker_score):
+        result["reranker_score"] = reranker_score
+    if value.get("reranker_mode") in {"medcpt", "lexical_fallback", "not_run"}:
+        result["reranker_mode"] = value["reranker_mode"]
+    if isinstance(value.get("subquestion_ids"), list):
+        result["subquestion_ids"] = [
+            item for item in value["subquestion_ids"][:8]
+            if isinstance(item, str) and re.fullmatch(r"sq-[1-8]", item)
+        ]
+    return result
+
+
+def _safe_retrieval_provenance(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for field, validator in (
+        ("channel_ranks", lambda item: type(item) is int and item >= 1),
+        ("channel_scores", lambda item: type(item) in {int, float} and math.isfinite(item)),
+    ):
+        source = value.get(field)
+        if isinstance(source, dict):
+            result[field] = {
+                key[:80]: item
+                for key, item in list(source.items())[:30]
+                if isinstance(key, str) and key.strip() and validator(item)
+            }
+    graph_path = value.get("graph_path")
+    if isinstance(graph_path, list):
+        result["graph_path"] = _safe_string_list(graph_path, limit=30, item_limit=200)
+    rrf_score = value.get("rrf_score")
+    if type(rrf_score) in {int, float} and math.isfinite(rrf_score):
+        result["rrf_score"] = rrf_score
+    if type(value.get("filter_satisfied")) is bool:
+        result["filter_satisfied"] = value["filter_satisfied"]
+    iteration = value.get("retrieval_iteration")
+    if type(iteration) is int and 0 <= iteration <= 100:
+        result["retrieval_iteration"] = iteration
     return result
 
 

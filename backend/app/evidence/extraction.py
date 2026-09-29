@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from backend.app.models.request_response import EvidenceRecord, RetrievalCandidate
+from backend.app.models.request_response import (
+    EvidenceRecord,
+    RetrievalCandidate,
+    RetrievalProvenance,
+)
 from backend.app.query.models import QueryPlan
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
 
@@ -130,6 +134,17 @@ class EvidenceExtractor:
             key_findings=key_findings,
             limitations=" ".join(limitations) if limitations else None,
             supporting_text_spans=spans,
+            retrieval_provenance=RetrievalProvenance(
+                channel_ranks=dict(candidate.channel_ranks),
+                channel_scores=dict(candidate.channel_scores),
+                graph_path=list(candidate.graph_path) if candidate.graph_path else None,
+                rrf_score=candidate.rrf_score,
+                filter_satisfied=candidate.filter_satisfied,
+                retrieval_iteration=candidate.retrieval_iteration,
+            ),
+            reranker_score=candidate.reranker_score,
+            reranker_mode=candidate.reranker_mode,
+            subquestion_ids=list(candidate.subquestion_ids),
         )
 
     def extract_all(self, candidates: Iterable[RetrievalCandidate], plan: QueryPlan) -> List[EvidenceRecord]:

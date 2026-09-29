@@ -423,6 +423,20 @@ class ResearchService:
                     "channel_scores": score_sources,
                     "graph_path": candidate.graph_path or previous.graph_path,
                     "filter_satisfied": previous.filter_satisfied and candidate.filter_satisfied,
+                    "retrieval_iteration": min(
+                        value for value in (
+                            previous.retrieval_iteration,
+                            candidate.retrieval_iteration,
+                        ) if value is not None
+                    ) if any(
+                        value is not None for value in (
+                            previous.retrieval_iteration,
+                            candidate.retrieval_iteration,
+                        )
+                    ) else None,
+                    "subquestion_ids": list(dict.fromkeys(
+                        previous.subquestion_ids + candidate.subquestion_ids
+                    )),
                 }
             )
 
@@ -633,6 +647,18 @@ class ResearchService:
                 candidates, details = self._search_plan(
                     plan, top_k=int(getattr(self.settings, "DENSE_TOP_K", 30))
                 )
+                candidates = [
+                    candidate.model_copy(
+                        update={
+                            "retrieval_iteration": workflow.iteration,
+                            "subquestion_ids": list(dict.fromkeys(
+                                candidate.subquestion_ids
+                                + ([workflow.current_subquestion_id] if workflow.current_subquestion_id else [])
+                            )),
+                        }
+                    )
+                    for candidate in candidates
+                ]
             except Exception:
                 workflow.technical_failure = True
                 workflow.stop_reason = "retrieval_failed"

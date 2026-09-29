@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from backend.app.models.request_response import (
     AgentAction,
     AnswerStatus,
-    EvidenceRecord,
+    PublicEvidenceRecord,
     PublicSearchCandidate,
 )
 
@@ -131,7 +131,7 @@ class ConversationTurnRequest(_StrictModel):
 
 class ConversationTurnPublicResult(_StrictModel):
     cited_pmids: list[Annotated[str, Field(max_length=20)]] = Field(default_factory=list, max_length=100)
-    evidence_table: list[EvidenceRecord] = Field(default_factory=list, max_length=100)
+    evidence_table: list[PublicEvidenceRecord] = Field(default_factory=list, max_length=100)
     retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)
     evidence_gaps: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
     consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"] | None = None
@@ -166,7 +166,7 @@ class ConversationTurnResponse(_StrictModel):
     answer_status: AnswerStatus
     assistant_message: str = Field(max_length=4000)
     cited_pmids: list[Annotated[str, Field(max_length=20)]] = Field(default_factory=list, max_length=100)
-    evidence_table: list[EvidenceRecord] = Field(default_factory=list, max_length=100)
+    evidence_table: list[PublicEvidenceRecord] = Field(default_factory=list, max_length=100)
     retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)
     evidence_gaps: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
     consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"]

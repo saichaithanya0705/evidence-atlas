@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 
 from backend.app.evidence.extraction import EvidenceExtractor
-from backend.app.models.request_response import AnswerStatus, EvidenceRecord, RetrievalCandidate
+from backend.app.models.request_response import (
+    AnswerStatus,
+    EvidenceRecord,
+    RetrievalCandidate,
+    RetrievalProvenance,
+)
 from backend.app.models.research_plan import CoverageStatus, SubquestionCoverage
 from backend.app.conversation.models import CorrectiveResearchProposal, EvidenceGapContext
 from backend.app.query.models import PICOModel, QueryPlan
@@ -152,6 +157,61 @@ def test_evidence_extractor_keeps_exact_spans_and_does_not_infer_pico_fields():
     assert all(span in abstract for span in evidence.supporting_text_spans)
     assert evidence.population is None
     assert evidence.intervention is None
+
+
+def test_evidence_extractor_copies_exact_retrieval_and_reranker_provenance():
+    candidate = make_candidate().model_copy(update={
+        "channel_ranks": {"dense_original": 2, "bm25": 1},
+        "channel_scores": {"dense_original": 0.82, "bm25": 7.5},
+        "graph_path": ["query:diabetes", "paper:35100001"],
+        "rrf_score": 0.041,
+        "filter_satisfied": True,
+        "reranker_score": 0.93,
+        "reranker_mode": "medcpt",
+        "retrieval_iteration": 1,
+        "subquestion_ids": ["sq-1", "sq-2"],
+    })
+
+    evidence = EvidenceExtractor().extract(candidate, make_plan())
+
+    assert evidence.retrieval_provenance == RetrievalProvenance(
+        channel_ranks={"dense_original": 2, "bm25": 1},
+        channel_scores={"dense_original": 0.82, "bm25": 7.5},
+        graph_path=["query:diabetes", "paper:35100001"],
+        rrf_score=0.041,
+        filter_satisfied=True,
+        retrieval_iteration=1,
+    )
+    assert evidence.reranker_score == 0.93
+    assert evidence.reranker_mode == "medcpt"
+    assert evidence.subquestion_ids == ["sq-1", "sq-2"]
+
+
+def test_candidate_merge_retains_all_channels_subquestions_and_first_iteration():
+    first = make_candidate().model_copy(update={
+        "channel_ranks": {"dense_original": 1},
+        "channel_scores": {"dense_original": 0.8},
+        "subquestion_ids": ["sq-1"],
+        "retrieval_iteration": 0,
+        "reranker_score": 0.7,
+    })
+    second = make_candidate().model_copy(update={
+        "channel_ranks": {"bm25": 2},
+        "channel_scores": {"bm25": 6.0},
+        "subquestion_ids": ["sq-2"],
+        "retrieval_iteration": 1,
+        "reranker_score": 0.9,
+    })
+    merged = {}
+
+    ResearchService._merge_candidates(merged, [first], 0)
+    ResearchService._merge_candidates(merged, [second], 1)
+
+    result = merged[first.pmid]
+    assert result.channel_ranks == {"dense_original": 1, "bm25": 2}
+    assert result.channel_scores == {"dense_original": 0.8, "bm25": 6.0}
+    assert result.subquestion_ids == ["sq-1", "sq-2"]
+    assert result.retrieval_iteration == 0
 
 
 class FakeQueryAnalysis:

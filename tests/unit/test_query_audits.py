@@ -144,7 +144,15 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
             {"pmid": "12345", "title": True, "year": "2024", "population": False,
              "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
             {"pmid": "23456", "title": "Valid title", "year": 2020, "population": "Adults",
-             "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+             "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"],
+             "retrieval_provenance": {
+                 "channel_ranks": {"bm25": 2, "bad": {"prompt": "nested score secret"}},
+                 "channel_scores": {"bm25": 7.25, "nan": float("nan")},
+                 "graph_path": ["query:diabetes", {"prompt": "nested graph secret"}],
+                 "rrf_score": 0.032, "filter_satisfied": True, "retrieval_iteration": 1,
+             },
+             "reranker_score": 0.88, "reranker_mode": "medcpt",
+             "subquestion_ids": ["sq-2", {"prompt": "nested subquestion secret"}]},
         ],
         "retrieved_papers": [
             {"pmid": 12345, "title": False, "year": "2024", "abstract": "Valid abstract",
@@ -180,7 +188,13 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
     assert detail["response"]["evidence_table"] == [
         {"pmid": "12345", "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
         {"pmid": "23456", "title": "Valid title", "year": 2020, "population": "Adults",
-         "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"]},
+         "key_findings": "Valid finding", "supporting_text_spans": ["Valid source span"],
+         "retrieval_provenance": {
+             "channel_ranks": {"bm25": 2}, "channel_scores": {"bm25": 7.25},
+             "graph_path": ["query:diabetes"], "rrf_score": 0.032,
+             "filter_satisfied": True, "retrieval_iteration": 1,
+         },
+         "reranker_score": 0.88, "reranker_mode": "medcpt", "subquestion_ids": ["sq-2"]},
     ]
     assert detail["response"]["retrieved_papers"] == [
         {"abstract": "Valid abstract", "authors": ["Valid Author"], "study_type": "Review"},
@@ -192,7 +206,7 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
         "agent_decision", "query_analysis", "correct", "claim_verified", "answer_released", "correction_stopped",
     ]
     assert "pico" not in str(detail)
-    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary", "nested event secret", "nested citation secret", "nested control secret", "nested author secret"):
+    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary", "nested event secret", "nested citation secret", "nested control secret", "nested author secret", "nested score secret", "nested graph secret", "nested subquestion secret"):
         assert unsafe not in str(detail)
     legacy_trace = client.get("/trace/linked-trace", headers=headers).json()
     assert "pico" not in str(legacy_trace)

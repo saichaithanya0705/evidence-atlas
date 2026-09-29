@@ -5,6 +5,7 @@ retrieval candidates, evidence records, and research workflows.
 Maintains exact compatibility with tests/e2e/e2e_contracts.py.
 """
 import re
+import math
 from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
@@ -80,6 +81,42 @@ class RetrievalCandidate(BaseModel):
     )
     graph_path: Optional[List[str]] = Field(default=None, description="Graph path if surfaced by concept graph")
     filter_satisfied: bool = Field(default=True, description="Whether paper complies with all metadata filters")
+    retrieval_iteration: Optional[int] = Field(default=None, ge=0, description="First retrieval pass that returned the paper")
+    subquestion_ids: List[str] = Field(default_factory=list, description="Research subquestions targeted by retrieval passes")
+
+
+class RetrievalProvenance(BaseModel):
+    """Administrator-visible source ranking metadata copied without fabrication."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel_ranks: Dict[str, int] = Field(default_factory=dict)
+    channel_scores: Dict[str, float] = Field(default_factory=dict)
+    graph_path: Optional[List[str]] = None
+    rrf_score: Optional[float] = None
+    filter_satisfied: bool = True
+    retrieval_iteration: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("channel_ranks")
+    @classmethod
+    def validate_ranks(cls, values: Dict[str, int]) -> Dict[str, int]:
+        if any(not key.strip() or type(value) is not int or value < 1 for key, value in values.items()):
+            raise ValueError("channel ranks require nonblank names and positive integer values")
+        return dict(values)
+
+    @field_validator("channel_scores")
+    @classmethod
+    def validate_scores(cls, values: Dict[str, float]) -> Dict[str, float]:
+        if any(not key.strip() or not math.isfinite(float(value)) for key, value in values.items()):
+            raise ValueError("channel scores must be finite and have nonblank names")
+        return dict(values)
+
+    @field_validator("rrf_score")
+    @classmethod
+    def validate_rrf_score(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("rrf_score must be finite")
+        return value
 
 
 class EvidenceRecord(BaseModel):
@@ -97,6 +134,10 @@ class EvidenceRecord(BaseModel):
     key_findings: str = Field(..., description="Synthesis of primary finding from abstract")
     limitations: Optional[str] = Field(default=None, description="Noted limitations or missing endpoints")
     supporting_text_spans: List[str] = Field(default_factory=list, description="Exact quotes from abstract")
+    retrieval_provenance: Optional[RetrievalProvenance] = None
+    reranker_score: Optional[float] = None
+    reranker_mode: Literal["medcpt", "lexical_fallback", "not_run"] = "not_run"
+    subquestion_ids: List[str] = Field(default_factory=list)
 
 
 class ClaimVerification(BaseModel):
@@ -178,6 +219,7 @@ class PublicEvidenceRecord(BaseModel):
 
     pmid: str
     title: str = ""
+    year: Optional[int] = None
     study_design: str = "Other"
     population: Optional[str] = None
     intervention: Optional[str] = None
@@ -185,6 +227,9 @@ class PublicEvidenceRecord(BaseModel):
     outcome: Optional[str] = None
     key_findings: str
     limitations: Optional[str] = None
+    supporting_text_spans: List[str] = Field(default_factory=list)
+    retrieval_channels: List[str] = Field(default_factory=list)
+    subquestion_ids: List[str] = Field(default_factory=list)
 
 
 class PublicResearchResponse(BaseModel):
