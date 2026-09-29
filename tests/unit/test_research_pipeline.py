@@ -539,6 +539,24 @@ def test_normalized_duplicate_agent_query_is_rejected_and_summaries_stay_bounded
     assert all("supporting_text_spans" not in str(payload) for _, payload in events)
 
 
+def test_rewrite_is_recorded_as_the_initial_query_for_gap_context():
+    service = make_test_service(judge=AlwaysPartialJudge())
+    contexts = []
+    raw_query = "Compare renal outcomes for adults with CKD taking SGLT2 inhibitors, 2019 onward"
+    rewrite = "SGLT2 inhibitor kidney outcomes"
+
+    service.research(
+        raw_query,
+        max_loops=1,
+        agent_rewrite=rewrite,
+        gap_reviewer=lambda context: contexts.append(context) or None,
+        request_id="rewrite-gap-context",
+    )
+
+    assert contexts[0].standalone_question == raw_query
+    assert contexts[0].prior_queries == [rewrite.casefold()]
+
+
 def test_research_emits_claim_verification_summary_before_release():
     service = make_test_service(judge=AlwaysSufficientJudge())
     events = []

@@ -105,6 +105,34 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert not {"request_id", "raw_prompt", "internal_trace", "audit_trace_url"} & restored_json.keys()
 
 
+def test_research_preserves_raw_message_and_passes_agent_rewrite_separately(tmp_path):
+    from backend.app.conversation.service import ConversationService
+
+    class CapturingResearch(_Research):
+        call_kwargs = None
+
+        def research(self, query, filters, max_loops, request_id, event_sink=None, **kwargs):
+            self.call_kwargs = {"query": query, **kwargs}
+            return super().research(query, filters, max_loops, request_id, event_sink)
+
+    raw_message = "Compare renal outcomes for adults with CKD taking SGLT2 inhibitors, 2019 onward"
+    agent_rewrite = "SGLT2 inhibitor kidney outcomes"
+    decision = _decision(standalone_query=agent_rewrite, complexity_hint="SIMPLE")
+    path = tmp_path / "raw-query-boundary.sqlite3"
+    account, store, audit = _setup(path)
+    conversation = store.create(account["id"])
+    research = CapturingResearch([])
+    service = ConversationService(store=store, audit=audit, agent=_Agent(decision, []), research=research)
+
+    service.run_turn(conversation["id"], account, ConversationTurnRequest(message=raw_message))
+
+    assert research.call_kwargs == {
+        "query": raw_message,
+        "agent_rewrite": agent_rewrite,
+        "agent_complexity_hint": "SIMPLE",
+    }
+
+
 def test_admin_turn_controls_are_forwarded_and_rejected_for_regular_accounts(tmp_path):
     from backend.app.conversation.service import ConversationService
 

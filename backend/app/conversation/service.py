@@ -224,7 +224,8 @@ class ConversationService:
                 } if is_admin else {}
                 max_loops = request.max_loops if is_admin else self.max_loops
                 research_response = self.research.research(
-                    decision.standalone_query, filters, max_loops, run_id, event_sink,
+                    message, filters, max_loops, run_id, event_sink,
+                    agent_rewrite=decision.standalone_query,
                     agent_complexity_hint=decision.complexity_hint,
                 )
                 final_route = _value(research_response, "route")

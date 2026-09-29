@@ -490,7 +490,7 @@ class ResearchService:
             raise ValueError("route_floor must be SIMPLE, MODERATE, or COMPLEX")
         state.route_floor = initial_floor
         state.current_complexity_hint = agent_complexity_hint
-        used_queries = [query]
+        used_queries = [agent_rewrite or query]
         research_started = perf_counter()
         from langgraph.graph import END, START, StateGraph
 
