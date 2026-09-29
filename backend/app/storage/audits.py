@@ -26,12 +26,22 @@ _EVENT_FIELDS = {
     "validate": {"status", "duration_ms"},
     "done": {"status", "duration_ms", "stop_reason"},
 }
-_CONTROL_FIELDS = {"year_min", "year_max", "study_types", "max_loops"}
 _RESPONSE_FIELDS = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps", "evidence_table", "retrieved_papers", "citations_valid", "citation_precision", "consensus_level", "route", "answer_status"}
 _EVIDENCE_FIELDS = {"pmid", "title", "year", "study_design", "population", "intervention", "comparator", "outcome", "key_findings", "limitations", "supporting_text_spans"}
 _PAPER_FIELDS = {"pmid", "title", "abstract", "journal", "year", "authors", "mesh_terms", "study_type"}
 _TRACE_FIELDS = {"valid", "citations_valid", "precision", "citation_precision", "cited_pmids", "invalid_pmids"}
 _TIMING_FIELDS = {"total", "total_ms", "duration_ms", "query_analysis", "retrieval", "judge", "evidence", "synthesis", "validation"}
+_ROUTES = {"SIMPLE", "MODERATE", "COMPLEX"}
+_ACTIONS = {"RESEARCH", "ANSWER_FROM_EVIDENCE", "CLARIFY", "ABSTAIN"}
+_ANSWER_STATUSES = {"SUPPORTED", "LIMITED", "INSUFFICIENT", "FAILED"}
+_CONSENSUS_LEVELS = {"consensus", "mixed", "conflicting", "insufficient"}
+_STOP_REASONS = {
+    "retrieval_failed", "evidence_sufficient", "unresolved_conflict",
+    "correction_budget_exhausted", "correction_disabled",
+    "correction_rejected_below_route_floor", "correction_stalled",
+    "citation_validation_failed_fail_closed", "completed",
+}
+_GRADES = {"SUFFICIENT", "INSUFFICIENT"}
 
 
 def _json(value):
@@ -47,27 +57,95 @@ def _safe_gaps(values):
 def _safe_mapping(value, allowed):
     if not isinstance(value, dict):
         return {}
-    return {key: value[key] for key in allowed if key in value and isinstance(value[key], (str, int, float, bool, list, dict, type(None)))}
+    return {
+        key: item[:4000] if isinstance(item, str) else item
+        for key in allowed if (item := value.get(key)) is not None
+        and (type(item) in {str, int, float, bool})
+        and (not isinstance(item, float) or math.isfinite(item))
+    }
+
+
+def _safe_string_list(value, *, limit=20, item_limit=200):
+    if not isinstance(value, list):
+        return []
+    return [item[:item_limit] for item in value[:limit] if isinstance(item, str) and item.strip()]
+
+
+def _safe_pmids(value):
+    return [item for item in _safe_string_list(value, limit=100, item_limit=20) if item.isdigit()]
 
 
 def _safe_controls(value):
     source = value if isinstance(value, dict) else {}
-    return {key: source[key] for key in _CONTROL_FIELDS if key in source}
+    result = {}
+    for key in ("year_min", "year_max"):
+        item = source.get(key)
+        if type(item) is int and 1800 <= item <= 3000:
+            result[key] = item
+    loops = source.get("max_loops")
+    if type(loops) is int and 0 <= loops <= 100:
+        result["max_loops"] = loops
+    study_types = source.get("study_types")
+    if isinstance(study_types, list):
+        result["study_types"] = _safe_string_list(study_types, limit=20, item_limit=80)
+    return result
+
+
+def _safe_evidence(value):
+    result = _safe_mapping(value, _EVIDENCE_FIELDS)
+    spans = value.get("supporting_text_spans")
+    if isinstance(spans, list):
+        result["supporting_text_spans"] = _safe_string_list(spans, limit=20, item_limit=1000)
+    return result
+
+
+def _safe_paper(value):
+    result = _safe_mapping(value, _PAPER_FIELDS)
+    for key in ("authors", "mesh_terms"):
+        if isinstance(value.get(key), list):
+            result[key] = _safe_string_list(value[key], limit=30, item_limit=160)
+    return result
+
+
+def _safe_citation_audit(value):
+    result = _safe_mapping(value, _TRACE_FIELDS)
+    for key in ("valid", "citations_valid"):
+        if key in result and type(result[key]) is not bool:
+            result.pop(key)
+    for key in ("precision", "citation_precision"):
+        if key in result and (type(result[key]) not in {int, float} or not 0 <= result[key] <= 1):
+            result.pop(key)
+    for key in ("cited_pmids", "invalid_pmids"):
+        if key in value:
+            result[key] = _safe_pmids(value[key])
+    return result
 
 
 def _safe_response(value):
     if not isinstance(value, dict):
         return None
     response = _safe_mapping(value, _RESPONSE_FIELDS)
+    response["cited_pmids"] = _safe_pmids(value.get("cited_pmids"))
     response["evidence_gaps"] = _safe_gaps(value.get("evidence_gaps"))
     response["evidence_table"] = [
-        _safe_mapping(item, _EVIDENCE_FIELDS) for item in value.get("evidence_table", [])[:20]
+        _safe_evidence(item) for item in value.get("evidence_table", [])[:20]
         if isinstance(item, dict)
     ] if isinstance(value.get("evidence_table"), list) else []
     response["retrieved_papers"] = [
-        _safe_mapping(item, _PAPER_FIELDS) for item in value.get("retrieved_papers", [])[:20]
+        _safe_paper(item) for item in value.get("retrieved_papers", [])[:20]
         if isinstance(item, dict)
     ] if isinstance(value.get("retrieved_papers"), list) else []
+    if response.get("answer_status") not in _ANSWER_STATUSES:
+        response.pop("answer_status", None)
+    if response.get("route") not in _ROUTES:
+        response.pop("route", None)
+    if response.get("consensus_level") not in _CONSENSUS_LEVELS:
+        response.pop("consensus_level", None)
+    if type(response.get("citations_valid")) is not bool:
+        response.pop("citations_valid", None)
+    precision = response.get("citation_precision")
+    if type(precision) not in {int, float} or not math.isfinite(precision) or not 0 <= precision <= 1:
+        response.pop("citation_precision", None)
     return response
 
 
@@ -77,7 +155,7 @@ def _safe_trace(value):
     result = {}
     citation_audit = value.get("citation_audit")
     if isinstance(citation_audit, dict):
-        result["citation_audit"] = _safe_mapping(citation_audit, _TRACE_FIELDS)
+        result["citation_audit"] = _safe_citation_audit(citation_audit)
     timings = value.get("timings_ms")
     if isinstance(timings, dict):
         result["timings_ms"] = {
@@ -92,10 +170,30 @@ def _safe_event(event):
     allowed = _EVENT_FIELDS.get(stage)
     if allowed is None:
         return None
-    payload = _safe_mapping(event.get("payload"), allowed)
+    source = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    payload = {}
+    enum_fields = {
+        "action": _ACTIONS, "complexity_hint": _ROUTES, "route": _ROUTES,
+        "route_floor": _ROUTES, "rule_route": _ROUTES,
+        "agent_complexity_hint": _ROUTES, "grade": _GRADES,
+        "status": {"started", "completed", "failed"} | _ANSWER_STATUSES,
+        "stop_reason": _STOP_REASONS, "reason": _STOP_REASONS,
+    }
+    boolean_fields = {"accepted", "rewrite_applied"}
+    integer_fields = {"iteration", "candidate_count", "missing_count", "conflict_count", "claim_count", "supported_count", "unsupported_count", "gap_count", "evidence_count"}
+    for key in allowed:
+        item = source.get(key)
+        if key in enum_fields and isinstance(item, str) and item in enum_fields[key]:
+            payload[key] = item
+        elif key in boolean_fields and type(item) is bool:
+            payload[key] = item
+        elif key == "duration_ms" and type(item) in {int, float} and math.isfinite(item) and item >= 0:
+            payload[key] = item
+        elif key in integer_fields and type(item) is int and 0 <= item <= 100000:
+            payload[key] = item
     # semantic verdict objects can include rationale and claim text; expose only counts.
     if stage == "semantic_verification":
-        verdicts = event.get("payload", {}).get("verdicts", [])
+        verdicts = source.get("verdicts", [])
         if isinstance(verdicts, list):
             payload = {
                 "supported_count": sum(bool(item.get("supported")) for item in verdicts if isinstance(item, dict)),

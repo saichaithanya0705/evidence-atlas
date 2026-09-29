@@ -21,3 +21,22 @@
 - Existing audit runs without conversation IDs remain readable with null linked fields.
 - Full suite: 946 passed, 1 skipped, 5 failed. Four failures are unrelated Qdrant local-storage tests colliding on the shared storage lock. The fifth exposed an existing workflow-event compatibility expectation; the internal event shape was restored while its admin projection remains allowlisted. The corresponding regression test passes in the focused rerun.
 - `git diff --check`: clean.
+
+## Fix Round 1 — nested allowlist values
+
+### RED
+
+- Added nested injection fixtures under `correction_stopped.reason`, `requested_controls.year_min` / `study_types`, and citation audit `cited_pmids`.
+- Command: `.venv\Scripts\python.exe -m pytest tests/unit/test_query_audits.py::test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events -q`
+- Result: failed as expected; the response preserved the nested prompt/provider values in the allowed control fields.
+
+### GREEN
+
+- Command: `.venv\Scripts\python.exe -m pytest tests/unit/test_query_audits.py tests/unit/test_admin_boundary.py tests/unit/test_research_pipeline.py::test_failed_synthesis_has_accurate_durable_stage_events -q`
+- Result: `16 passed, 4 warnings in 6.30s`.
+
+### Self-review
+
+- Generic projection helpers now accept scalar values only. Controls, event fields, citation summaries, PMIDs, evidence spans, paper lists, and timings each use their expected types and bounds; event enums and correction reasons are validated. Nested dictionaries/lists are either field-specifically sanitized or omitted.
+- Legitimate normalized evidence gaps, citation booleans/PMIDs, and finite numeric stage timings continue to project in the passing tests. The workflow event compatibility test also remains green.
+- `git diff --check`: clean before commit.

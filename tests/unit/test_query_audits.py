@@ -5,7 +5,7 @@ from backend.app import main
 from backend.app.core.config import get_settings
 from backend.app.storage.accounts import AccountStore
 from backend.app.storage.audits import AuditStore
-from backend.app.storage.database import initialize_db
+from backend.app.storage.database import connect_db, initialize_db
 from backend.app.auth.security import hash_password
 from backend.app.models.request_response import ResearchResponse, RetrievalCandidate
 
@@ -136,10 +136,19 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
     audits.event("linked-trace", "correct", {"status": "completed", "duration_ms": 12.5, "query": "private correction"})
     audits.event("linked-trace", "claim_verified", {"claim_count": 2, "supported_count": 2, "raw_output": "secret"})
     audits.event("linked-trace", "answer_released", {"status": "SUPPORTED", "gap_count": 1})
+    audits.event("linked-trace", "correction_stopped", {"reason": {"prompt": "nested event secret"}, "iteration": 1})
     audits.finish("linked-trace", "completed", {
         "answer_status": "SUPPORTED", "evidence_gaps": ["  missing   pediatric evidence  "],
         "provider_output": "private provider text", "prompt": "hidden system prompt",
-    }, {"query_plan": {"pico": {"population": "sensitive"}, "router_reasoning": "hidden"}})
+    }, {
+        "query_plan": {"pico": {"population": "sensitive"}, "router_reasoning": "hidden"},
+        "citation_audit": {"valid": True, "cited_pmids": ["12345", {"provider_output": "nested citation secret"}]},
+    })
+    with connect_db(path) as db:
+        db.execute("UPDATE query_runs SET requested_controls=?,applied_controls=? WHERE id=?", (
+            '{"year_min":{"prompt":"nested control secret"},"study_types":["Review",{"provider_output":"nested control secret"}]}',
+            '{"max_loops":{"prompt":"nested control secret"}}', "linked-trace",
+        ))
     audits.start("legacy-audit", account, "research", "old question", {}, {})
     audits.finish("legacy-audit", "completed", {"synthesis": "legacy result"})
 
@@ -153,11 +162,15 @@ def test_admin_audit_projects_linked_trace_summaries_and_allowlisted_events(audi
     detail = client.get("/admin/audits/linked-trace", headers=headers).json()
     assert detail["evidence_gaps"] == ["missing pediatric evidence"]
     assert detail["stage_durations_ms"] == {"correct": 12.5}
+    assert detail["requested_controls"] == {"study_types": ["Review"]}
+    assert detail["applied_controls"] == {}
+    assert detail["trace"]["citation_audit"]["cited_pmids"] == ["12345"]
+    assert "reason" not in next(event["payload"] for event in detail["events"] if event["stage"] == "correction_stopped")
     assert [event["stage"] for event in detail["events"]] == [
-        "agent_decision", "query_analysis", "correct", "claim_verified", "answer_released",
+        "agent_decision", "query_analysis", "correct", "claim_verified", "answer_released", "correction_stopped",
     ]
     assert "pico" not in str(detail)
-    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary"):
+    for unsafe in ("prompt", "provider_output", "raw_output", "router_reasoning", "decision_summary", "nested event secret", "nested citation secret", "nested control secret"):
         assert unsafe not in str(detail)
     legacy_trace = client.get("/trace/linked-trace", headers=headers).json()
     assert "pico" not in str(legacy_trace)
