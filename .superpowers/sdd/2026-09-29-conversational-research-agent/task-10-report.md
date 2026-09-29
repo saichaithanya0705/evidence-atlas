@@ -24,6 +24,8 @@
 
 ## Fix Round 1 — nested allowlist values
 
+- Fix commit: `54e9ab9` (`fix: sanitize nested audit projection values`).
+
 ### RED
 
 - Added nested injection fixtures under `correction_stopped.reason`, `requested_controls.year_min` / `study_types`, and citation audit `cited_pmids`.
