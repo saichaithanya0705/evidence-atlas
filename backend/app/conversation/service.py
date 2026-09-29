@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from backend.app.conversation.models import (
     ConversationCreateResponse,
@@ -15,6 +16,7 @@ from backend.app.conversation.models import (
     ConversationHistoryWindow,
     ConversationSummary,
     ConversationTurnContext,
+    ConversationTurnPublicResult,
     ConversationTurnRecord,
     ConversationTurnRequest,
     ConversationTurnResponse,
@@ -91,11 +93,25 @@ class ConversationService:
         if page is None:
             return None
         conversation = page["conversation"]
-        turns = [ConversationTurnRecord(
-            turn_id=item["id"], sequence=item["ordinal"], user_message=item["user_message"],
-            action=item["agent_action"],
-            answer_status=item["answer_status"], assistant_message=item["assistant_message"], created_at=item["created_at"],
-        ) for item in page["turns"]]
+        turns = []
+        for item in page["turns"]:
+            result = None
+            if item["status"] == "completed" and item.get("public_response_json"):
+                try:
+                    saved = json.loads(item["public_response_json"])
+                    public_fields = (
+                        "cited_pmids", "evidence_table", "retrieved_papers", "evidence_gaps", "consensus_level",
+                    )
+                    result = ConversationTurnPublicResult.model_validate({
+                        field: saved[field] for field in public_fields if field in saved
+                    })
+                except (TypeError, ValueError, ValidationError):
+                    result = None
+            turns.append(ConversationTurnRecord(
+                turn_id=item["id"], sequence=item["ordinal"], user_message=item["user_message"],
+                action=item["agent_action"], answer_status=item["answer_status"],
+                assistant_message=item["assistant_message"], created_at=item["created_at"], result=result,
+            ))
         following = offset + len(turns)
         return ConversationDetailResponse(
             conversation=ConversationSummary(
@@ -162,6 +178,10 @@ class ConversationService:
         return candidates, evidence
 
     def run_turn(self, conversation_id: str, account: dict, request: ConversationTurnRequest) -> ConversationTurnResponse:
+        is_admin = account.get("role") == "admin"
+        supplied_controls = {"year_min", "year_max", "study_types", "max_loops"} & request.model_fields_set
+        if supplied_controls and not is_admin:
+            raise HTTPException(status_code=403, detail="Advanced research controls require an administrator account")
         account_id = self._account_id(account)
         message = request.message.strip()
         existing = self.store.detail_for_account(conversation_id, account_id, limit=1, offset=0)
@@ -192,8 +212,15 @@ class ConversationService:
             standalone_query = decision.standalone_query
             complexity_hint = decision.complexity_hint
             if decision.action is AgentAction.RESEARCH:
+                filters = {
+                    key: value for key, value in (
+                        ("year_min", request.year_min), ("year_max", request.year_max),
+                        ("study_types", request.study_types),
+                    ) if value is not None
+                } if is_admin else {}
+                max_loops = request.max_loops if is_admin else self.max_loops
                 research_response = self.research.research(
-                    decision.standalone_query, {}, self.max_loops, run_id, event_sink,
+                    decision.standalone_query, filters, max_loops, run_id, event_sink,
                     agent_complexity_hint=decision.complexity_hint,
                 )
                 final_route = _value(research_response, "route")

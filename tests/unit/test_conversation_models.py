@@ -84,20 +84,29 @@ def test_agent_decision_rejects_blank_oversized_and_unknown_strings():
         ConversationAgentDecision(action="RESEARCH", standalone_query="x" * 4001, complexity_hint="SIMPLE", decision_summary="summary")
 
 
-def test_conversation_turn_request_trims_and_enforces_one_to_four_thousand_characters():
-    assert ConversationTurnRequest(message="  Find evidence  ").message == "Find evidence"
+def test_conversation_turn_request_validates_user_message_and_admin_controls():
+    request = ConversationTurnRequest(
+        message="  Find evidence  ", year_min=2020, year_max=2024,
+        study_types=["Review"], max_loops=4,
+    )
+    assert request.message == "Find evidence"
+    assert request.year_min == 2020
+    assert request.study_types == ["Review"]
+    assert request.max_loops == 4
     for message in ("", " \t ", "x" * 4001):
         with pytest.raises(ValidationError):
             ConversationTurnRequest(message=message)
-    with pytest.raises(ValidationError):
-        ConversationTurnRequest(message="question", max_loops=5)
-    for admin_control in (
-        {"year_min": 2020},
-        {"study_types": ["Randomized Controlled Trial"]},
-        {"max_loops": 2},
+    for invalid in (
+        {"year_min": 1899}, {"year_max": 2100}, {"year_min": 2025, "year_max": 2024},
+        {"max_loops": 6}, {"study_types": "Review"},
     ):
         with pytest.raises(ValidationError):
-            ConversationTurnRequest(message="question", **admin_control)
+            ConversationTurnRequest(message="question", **invalid)
+    with pytest.raises(ValidationError):
+        ConversationAgentDecision(
+            action="RESEARCH", standalone_query="Question", complexity_hint="SIMPLE",
+            decision_summary="summary", max_loops=5,
+        )
 
 
 def test_research_response_defaults_to_supported_without_breaking_old_payloads():
@@ -131,6 +140,7 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
     turn = ConversationTurnRecord(
         turn_id="t-1", sequence=1, user_message="Question", action="RESEARCH",
         answer_status="SUPPORTED", assistant_message="Answer", created_at=now,
+        result={"cited_pmids": ["12345"], "evidence_table": [], "retrieved_papers": [], "evidence_gaps": [], "consensus_level": "consensus"},
     )
     detail = ConversationDetailResponse(conversation=summary, turns=[turn], next_cursor=None)
     gap = EvidenceGapContext(
@@ -155,12 +165,22 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
     )
     assert created.conversation_id == summary.conversation_id
     assert detail.turns[0].sequence == 1
+    assert detail.turns[0].result.cited_pmids == ["12345"]
     assert gap.standalone_question == "What are the safety outcomes?"
     assert gap.deterministic_grade == "PARTIAL"
     assert gap.route_floor == "MODERATE"
     assert proposal.complexity_hint == "MODERATE"
     assert history.recent_turns[0].content == "Question"
     assert response.model_dump(mode="json")["answer_status"] == "LIMITED"
+
+
+def test_conversation_turn_public_result_rejects_internal_fields():
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValidationError):
+        ConversationTurnRecord(
+            turn_id="t-1", sequence=1, user_message="Question", action="RESEARCH",
+            created_at=now, result={"cited_pmids": [], "raw_prompt": "secret"},
+        )
 
 
 def test_failed_turn_record_keeps_failure_status_without_fabricating_agent_action():

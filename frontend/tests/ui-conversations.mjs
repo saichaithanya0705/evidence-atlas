@@ -13,6 +13,10 @@ let nextId = 1;
 let expireNextList = false;
 let delayTurn = false;
 let failNextTurn = false;
+let heldTurn = null;
+let heldTurnReady = Promise.resolve();
+let announceHeldTurn = () => {};
+let lastTurnBody = null;
 const conversations = new Map();
 
 function turn(status, message) {
@@ -28,7 +32,7 @@ await page.route('**/api/**', async route => {
   let status = 200;
   let data = {};
   if (url.pathname === '/api/auth/me') { if (session) data = { account: session }; else status = 401; }
-  else if (url.pathname === '/api/auth/login') { session = { id: 'reader', username: body.username, display_name: 'Reader', role: 'user', active: 1, must_change_password: 0 }; data = { account: session }; }
+  else if (url.pathname === '/api/auth/login') { const role = body.username === 'administrator' ? 'admin' : 'user'; session = { id: role, username: body.username, display_name: role === 'admin' ? 'Administrator' : 'Reader', role, active: 1, must_change_password: 0 }; data = { account: session }; }
   else if (url.pathname === '/api/health') data = { status: 'healthy' };
   else if (url.pathname === '/api/auth/logout') { session = null; data = { signed_out: true }; }
   else if (url.pathname === '/api/conversations' && request.method() === 'POST') {
@@ -42,13 +46,20 @@ await page.route('**/api/**', async route => {
     if (failNextTurn) { failNextTurn = false; await route.abort('failed'); return; }
     const id = url.pathname.split('/')[3];
     if (delayTurn) await new Promise(resolve => setTimeout(resolve, 350));
+    lastTurnBody = body;
+    if (body.message.startsWith('hold ')) await new Promise(resolve => { heldTurn = { resolve, id, message: body.message }; announceHeldTurn(heldTurn); });
     const record = conversations.get(id);
+    if (body.message === 'hold failed A') {
+      const failed = { turn_id: `turn-${Date.now()}`, sequence: record.turns.length + 1, user_message: body.message, action: 'RESEARCH', answer_status: 'FAILED', assistant_message: 'A technical failure prevented this turn from completing. Please try again.', created_at: '2026-09-29T12:00:00Z', result: null };
+      record.turns.push(failed); status = 503; data = { detail: 'The conversation turn could not be completed' };
+    } else {
     const answerStatus = body.message === 'limited' ? 'LIMITED' : body.message === 'insufficient' ? 'INSUFFICIENT' : body.message === 'failed' ? 'FAILED' : 'SUPPORTED';
     const result = turn(answerStatus, body.message);
     result.conversation_id = id;
     if (record.turns.length === 0) record.conversation.title = body.message.slice(0, 80);
-    record.turns.push({ turn_id: result.turn_id, sequence: record.turns.length + 1, user_message: body.message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', result });
+    record.turns.push({ turn_id: result.turn_id, sequence: record.turns.length + 1, user_message: body.message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', public_response: { cited_pmids: result.cited_pmids, evidence_table: [{ pmid: '12345', title: 'Restored evidence', key_findings: 'Restored finding' }], retrieved_papers: result.retrieved_papers, evidence_gaps: result.evidence_gaps, consensus_level: result.consensus_level } });
     data = result;
+    }
   } else if (/\/api\/conversations\/[^/]+$/.test(url.pathname)) {
     const id = url.pathname.split('/').pop();
     const record = conversations.get(id);
@@ -91,7 +102,7 @@ try {
   await page.getByText('Which population should the review focus on?').waitFor();
   failNextTurn = true;
   await composer.fill('retry this text'); await page.keyboard.press('Enter');
-  await page.getByText('A technical failure prevented this turn from completing.').waitFor();
+  await page.getByText('A technical failure prevented this turn from completing.').last().waitFor();
   assert.equal(await page.getByLabel('Research message').inputValue(), 'retry this text', 'retryable errors preserve the entered message');
   await page.getByLabel('Research message').fill('');
 
@@ -99,15 +110,65 @@ try {
   await page.getByText('Which population should the review focus on?').waitFor();
   await page.getByText('INSUFFICIENT', { exact: true }).waitFor();
   await page.getByRole('button', { name: /Conversations/i }).click();
-  await page.getByRole('button', { name: /first question/i }).click();
-  await page.getByText('SUPPORTED response for first question.').waitFor();
+    await page.getByRole('button', { name: /first question/i }).click();
+    await page.getByText('SUPPORTED response for first question.').waitFor();
   await page.getByRole('button', { name: 'PMID: 12345' }).first().click();
   await page.getByText('Selected source 12345.').waitFor();
   await page.getByLabel('Research message').fill('line one');
   await page.keyboard.press('Shift+Enter');
   await page.getByLabel('Research message').press('End');
-  await page.getByLabel('Research message').pressSequentially('line two');
-  assert.match(await page.getByLabel('Research message').inputValue(), /line one\nline two/);
+    await page.getByLabel('Research message').pressSequentially('line two');
+    assert.match(await page.getByLabel('Research message').inputValue(), /line one\nline two/);
+
+  await page.getByRole('button', { name: /Conversations/i }).click();
+  await page.getByRole('button', { name: /first question/i }).click();
+  heldTurnReady = new Promise(resolve => { announceHeldTurn = resolve; });
+  await page.getByLabel('Research message').fill('hold completion A');
+  await page.keyboard.press('Enter');
+  await heldTurnReady;
+  await page.getByRole('status').filter({ hasText: /Retrieving|reviewing|evidence/i }).waitFor();
+  await page.getByRole('button', { name: /Conversations/i }).click();
+  await page.getByRole('button', { name: /limited/i }).click();
+  heldTurn.resolve(); heldTurn = null;
+  await page.waitForTimeout(80);
+  assert.equal(await page.getByRole('region', { name: 'Conversation messages' }).getByText('hold completion A', { exact: true }).count(), 0, 'a completed turn from A must not append to B');
+  await page.getByRole('button', { name: /Conversations/i }).click();
+  await page.getByRole('button', { name: /first question/i }).click();
+  await page.getByText('SUPPORTED response for hold completion A.').waitFor();
+  await page.getByRole('button', { name: 'Illustrative research record' }).last().waitFor();
+  await page.getByText('Restored finding').first().waitFor();
+  await page.getByRole('button', { name: 'Illustrative research record' }).last().click();
+  await page.getByText('Selected source 12345.').waitFor();
+
+  heldTurnReady = new Promise(resolve => { announceHeldTurn = resolve; });
+  await page.getByLabel('Research message').fill('hold failed A');
+  await page.keyboard.press('Enter');
+  await heldTurnReady;
+  await page.getByRole('status').filter({ hasText: /Retrieving|reviewing|evidence/i }).waitFor();
+  await page.getByRole('button', { name: /Conversations/i }).click();
+  await page.getByRole('button', { name: /limited/i }).click();
+  heldTurn.resolve(); heldTurn = null;
+  await page.waitForTimeout(80);
+  assert.equal(await page.getByRole('alert').count(), 0, 'a failed turn from A must not show an error in B');
+  await page.getByRole('button', { name: /Conversations/i }).click();
+  await page.getByRole('button', { name: /first question/i }).click();
+  await page.getByText('FAILED', { exact: true }).first().waitFor();
+
+  assert.equal(await page.getByLabel('Publication year from').count(), 0, 'ordinary accounts cannot access admin research controls');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByLabel('Username').fill('administrator');
+  await page.getByLabel('Password').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('heading', { name: /Research conversations/i }).waitFor();
+  assert.equal(await page.getByLabel('Publication year from').count(), 1);
+  await page.getByLabel('Publication year from').selectOption('2020');
+  await page.getByLabel('Publication year to').selectOption('2024');
+  await page.getByLabel('Study type').selectOption('Review');
+  await page.getByLabel('Corrective retrieval attempts').selectOption('4');
+  await page.getByLabel('Research message').fill('admin controlled question');
+  await page.keyboard.press('Enter');
+  await page.getByText('SUPPORTED response for admin controlled question.').waitFor();
+  assert.deepEqual(lastTurnBody, { message: 'admin controlled question', year_min: 2020, year_max: 2024, study_types: ['Review'], max_loops: 4 });
 
   expireNextList = true;
   await page.reload();
@@ -115,6 +176,6 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS conversation persistence and interaction');
 } catch (error) {
-  console.error('FAIL conversation persistence and interaction:', error.message);
+  console.error('FAIL conversation persistence and interaction:', error.message, 'URL:', page.url(), 'BODY:', (await page.locator('body').innerText()).slice(0, 900));
   process.exitCode = 1;
 } finally { await context.close(); await browser.close(); }

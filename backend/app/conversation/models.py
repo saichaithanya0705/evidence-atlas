@@ -117,6 +117,29 @@ class ConversationSummary(_StrictModel):
 
 class ConversationTurnRequest(_StrictModel):
     message: str = Field(min_length=1, max_length=4000)
+    year_min: int | None = Field(default=None, ge=1900, le=2099)
+    year_max: int | None = Field(default=None, ge=1900, le=2099)
+    study_types: list[str] | None = None
+    max_loops: int = Field(default=2, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def validate_controls(self):
+        if self.year_min is not None and self.year_max is not None and self.year_min > self.year_max:
+            raise ValueError("year_min cannot be greater than year_max")
+        return self
+
+
+class ConversationTurnPublicResult(_StrictModel):
+    cited_pmids: list[Annotated[str, Field(max_length=20)]] = Field(default_factory=list, max_length=100)
+    evidence_table: list[EvidenceRecord] = Field(default_factory=list, max_length=100)
+    retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)
+    evidence_gaps: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
+    consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"] | None = None
+
+    @field_validator("cited_pmids", "evidence_gaps")
+    @classmethod
+    def trim_public_lists(cls, values: list[str]) -> list[str]:
+        return _trim_string_list(values)
 
 
 class ConversationTurnRecord(_StrictModel):
@@ -127,6 +150,7 @@ class ConversationTurnRecord(_StrictModel):
     answer_status: AnswerStatus | None = None
     assistant_message: str | None = Field(default=None, max_length=4000)
     created_at: datetime
+    result: ConversationTurnPublicResult | None = None
 
 
 class ConversationDetailResponse(_StrictModel):

@@ -12,14 +12,16 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   const [activeConversation, setActiveConversation] = useState(null);
   const [listState, setListState] = useState({ loading: true, error: "" });
   const [detailState, setDetailState] = useState({ loading: !!conversationId, error: "" });
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingIds, setSubmittingIds] = useState(() => new Set());
   const [submissionError, setSubmissionError] = useState("");
   const [pending, setPending] = useState(null);
   const [showList, setShowList] = useState(!conversationId);
   const [selection, setSelection] = useState(null);
   const loadGeneration = useRef(0);
   const skipLoadId = useRef(null);
-  const submittingRef = useRef(false);
+  const activeConversationIdRef = useRef(conversationId);
+  const inFlightRef = useRef(new Map());
+  activeConversationIdRef.current = conversationId;
   const responseRef = useRef(null);
   const focusAfterResponse = useRef(false);
 
@@ -30,8 +32,10 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   }, [conversationId]);
 
   useEffect(() => {
-    if (!conversationId) { setTurns([]); setActiveConversation(null); setDetailState({ loading: false, error: "" }); return undefined; }
     if (skipLoadId.current === conversationId) { skipLoadId.current = null; return undefined; }
+    setPending(null);
+    setSubmissionError("");
+    if (!conversationId) { setTurns([]); setActiveConversation(null); setDetailState({ loading: false, error: "" }); return undefined; }
     const generation = ++loadGeneration.current;
     let active = true;
     setDetailState({ loading: true, error: "" });
@@ -45,7 +49,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
         }
         if (!active || generation !== loadGeneration.current) return;
         setActiveConversation(result.conversation);
-        setTurns(allTurns.sort((left, right) => left.sequence - right.sequence).map(turn => ({ ...turn })));
+        setTurns(allTurns.sort((left, right) => left.sequence - right.sequence).map(turn => ({ ...turn, result: turn.result || turn.public_response || null })));
         setDetailState({ loading: false, error: "" });
       } catch (error) { if (active && generation === loadGeneration.current) setDetailState({ loading: false, error: errorText(error) }); }
     }
@@ -53,43 +57,67 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     return () => { active = false; };
   }, [conversationId]);
 
+  const activeLockKey = conversationId || "__new__";
+  const submitting = submittingIds.has(activeLockKey);
   useEffect(() => { if (focusAfterResponse.current && !submitting) { responseRef.current?.focus(); focusAfterResponse.current = false; } }, [turns, submitting]);
 
-  async function startNew() { setShowList(false); setSelection(null); navigate(isAdmin ? "/admin/research" : "/research"); }
-  function selectConversation(id) { setShowList(false); setSelection(null); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
-  async function submit(message) {
-    if (submittingRef.current) return false;
+  function startNew() { activeConversationIdRef.current = null; setActiveConversation(null); setTurns([]); setPending(null); setSubmissionError(""); setShowList(false); setSelection(null); navigate(isAdmin ? "/admin/research" : "/research"); }
+  function selectConversation(id) { activeConversationIdRef.current = id; setPending(null); setSubmissionError(""); setShowList(false); setSelection(null); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
+  async function submit(message, controls = {}) {
+    const initialKey = conversationId || "__new__";
+    if (inFlightRef.current.has(initialKey)) return false;
+    const requestToken = Symbol("conversation-turn");
+    inFlightRef.current.set(initialKey, requestToken);
+    setSubmittingIds(current => new Set(current).add(initialKey));
     const shouldFocusResponse = document.activeElement?.id !== "conversation-message";
-    submittingRef.current = true;
-    setSubmitting(true);
     setSubmissionError("");
     setDetailState({ loading: false, error: "" });
     let id = conversationId;
+    let lockKey = initialKey;
     let localTurn = null;
+    const canUpdateActive = () => activeConversationIdRef.current === id && inFlightRef.current.get(lockKey) === requestToken;
     try {
       if (!id) {
         const created = await createConversation();
         id = created.conversation_id;
+        inFlightRef.current.delete(initialKey);
+        inFlightRef.current.set(id, requestToken);
+        lockKey = id;
+        setSubmittingIds(current => { const next = new Set(current); next.delete(initialKey); next.add(id); return next; });
         setActiveConversation(created);
         skipLoadId.current = id;
+        activeConversationIdRef.current = id;
         navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`);
       }
       localTurn = { turn_id: `pending-${Date.now()}`, user_message: message, action: null, answer_status: null, assistant_message: null };
       setTurns(current => [...current, localTurn]);
       setPending({ message });
-      const response = await submitConversationTurn(id, { message });
+      const response = await submitConversationTurn(id, { message, ...controls });
       const completedTurn = { ...localTurn, turn_id: response.turn_id, action: response.action, answer_status: response.answer_status, assistant_message: response.assistant_message, result: response };
-      setTurns(current => [...current.filter(turn => turn.turn_id !== localTurn.turn_id), completedTurn]);
-      setPending(null);
-      setConversations(current => [{ conversation_id: id, title: message.slice(0, 80), updated_at: new Date().toISOString() }, ...current.filter(item => item.conversation_id !== id)]);
-      focusAfterResponse.current = shouldFocusResponse;
-      return true;
+      const responseIsActive = canUpdateActive();
+      if (responseIsActive) {
+        setTurns(current => [...current.filter(turn => turn.turn_id !== localTurn.turn_id), completedTurn]);
+        setPending(null);
+        focusAfterResponse.current = shouldFocusResponse;
+        setActiveConversation(current => current && ["New conversation", "New research"].includes(current.title) ? { ...current, title: message.slice(0, 80) } : current);
+      }
+      setConversations(current => {
+        const existing = current.find(item => item.conversation_id === id);
+        const defaultTitle = !existing || ["New conversation", "New research"].includes(existing.title);
+        return [{ conversation_id: id, title: defaultTitle ? message.slice(0, 80) : existing.title, updated_at: new Date().toISOString() }, ...current.filter(item => item.conversation_id !== id)];
+      });
+      return responseIsActive;
     } catch (error) {
-      if (localTurn) setTurns(current => current.map(turn => turn.turn_id === localTurn.turn_id ? { ...turn, answer_status: "FAILED", action: "RESEARCH", assistant_message: "A technical failure prevented this turn from completing. Please try again." } : turn));
-      setSubmissionError(`${errorText(error)} Your message is still here; retry when ready.`);
-      setPending(null);
+      if (canUpdateActive()) {
+        if (localTurn) setTurns(current => current.map(turn => turn.turn_id === localTurn.turn_id ? { ...turn, answer_status: "FAILED", action: "RESEARCH", assistant_message: "A technical failure prevented this turn from completing. Please try again." } : turn));
+        setSubmissionError(`${errorText(error)} Your message is still here; retry when ready.`);
+        setPending(null);
+      }
       return false;
-    } finally { submittingRef.current = false; setSubmitting(false); }
+    } finally {
+      if (inFlightRef.current.get(lockKey) === requestToken) inFlightRef.current.delete(lockKey);
+      setSubmittingIds(current => { const next = new Set(current); next.delete(lockKey); return next; });
+    }
   }
 
   const title = activeConversation?.title || "Research conversations";
@@ -101,7 +129,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     {!detailState.loading && !detailState.error && <>
       {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={pmid => setSelection({ type: "evidence", pmid })} onPaper={paper => setSelection({ type: "paper", paper })} />}
       {!conversationId && !showList && <p className="conversation-empty">Start with a research question. Your messages will be saved in this conversation.</p>}
-      <ResearchComposer onSubmit={submit} submitting={submitting} />
+      <ResearchComposer onSubmit={submit} submitting={submitting} isAdmin={isAdmin} />
       {submissionError && <p className="conversation-error" role="alert">{submissionError}</p>}
       {selection && <p className="message-context" role="status">Selected source {selection.pmid || selection.paper?.pmid}. Open the paper from its source record to review the original study.</p>}
     </>}

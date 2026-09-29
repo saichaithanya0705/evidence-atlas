@@ -65,6 +65,10 @@ def test_turn_post_rejects_missing_csrf_and_advanced_user_controls(client):
     assert client.post("/conversations", json={}, headers=no_csrf).status_code == 403
     assert client.post(f"/conversations/{conversation_id}/turns", json={"message": "diabetes"}, headers=no_csrf).status_code == 403
     assert client.post(f"/conversations/{conversation_id}/turns", json={"message": "diabetes", "max_loops": 9}, headers=headers).status_code == 422
+    assert client.post(
+        f"/conversations/{conversation_id}/turns",
+        json={"message": "diabetes", "year_min": 2020}, headers=headers,
+    ).status_code == 403
 
 
 def test_foreign_conversation_is_hidden_as_not_found(client):
@@ -113,6 +117,9 @@ def test_turn_route_returns_the_completed_public_response(client):
     assert response.json()["action"] == "CLARIFY"
     assert response.json()["answer_status"] == "INSUFFICIENT"
     assert response.json()["assistant_message"] == "Please name the outcome."
+    restored = client.get(f"/conversations/{conversation_id}", headers=headers).json()["turns"][0]
+    assert restored["result"]["cited_pmids"] == []
+    assert "raw_prompt" not in restored["result"]
 
 
 def test_failed_turn_remains_failed_after_api_reload(client):

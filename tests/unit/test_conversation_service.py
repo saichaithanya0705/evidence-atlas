@@ -95,6 +95,42 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert not {"audit_trace_url", "canonical_query", "route", "citation_precision", "raw_prompt", "model_output", "internal_trace"} & public.keys()
     assert [item[0] for item in events] == ["agent", "research"]
     assert store.detail_for_account(conversation["id"], account["id"])["conversation"]["title"] == "diabetes evidence"
+    restored = service.detail(conversation["id"], account, limit=100, offset=0).turns[0].result
+    assert restored.cited_pmids == ["12345"]
+    assert restored.evidence_table[0].key_findings == "Result"
+    assert restored.retrieved_papers[0].abstract == "Safe abstract"
+    restored_json = restored.model_dump(mode="json")
+    assert "rrf_score" not in restored_json["retrieved_papers"][0]
+    assert "admin_only" not in restored_json["evidence_table"][0]
+    assert not {"request_id", "raw_prompt", "internal_trace", "audit_trace_url"} & restored_json.keys()
+
+
+def test_admin_turn_controls_are_forwarded_and_rejected_for_regular_accounts(tmp_path):
+    from backend.app.conversation.service import ConversationService
+
+    path = tmp_path / "admin-controls.sqlite3"
+    account, store, audit = _setup(path)
+    events = []
+    conversation = store.create(account["id"])
+    service = ConversationService(
+        store=store, audit=audit, agent=_Agent(_decision(), events), research=_Research(events),
+        settings=SimpleNamespace(MAX_CORRECTIVE_LOOPS=5),
+    )
+    request = ConversationTurnRequest(
+        message="diabetes evidence", year_min=2020, year_max=2024,
+        study_types=["Review"], max_loops=4,
+    )
+
+    with pytest.raises(HTTPException) as denied:
+        service.run_turn(conversation["id"], account, request)
+    assert denied.value.status_code == 403
+    assert store.detail_for_account(conversation["id"], account["id"])["total_turns"] == 0
+
+    admin = {**account, "role": "admin"}
+    service.run_turn(conversation["id"], admin, request)
+    research_call = next(event for event in events if event[0] == "research")
+    assert research_call[2] == {"year_min": 2020, "year_max": 2024, "study_types": ["Review"]}
+    assert research_call[3] == 4
 
 
 def test_recent_history_and_older_summary_use_bounded_deterministic_fields(tmp_path):

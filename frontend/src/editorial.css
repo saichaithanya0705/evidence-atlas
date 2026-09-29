@@ -226,6 +226,13 @@ dialog.paper-drawer[open] { display: flex; flex-direction: column; }
 .conversation-message .answer-status.failed { color: #8a3f31; }
 .conversation-message .answer-status.insufficient { color: #79551d; }
 .conversation-message .message-context { color: var(--muted); font-size: 13px; }
+.message-evidence { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.message-evidence h3 { margin: 0 0 12px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.message-evidence article { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.message-evidence article:last-child { border-bottom: 0; }
+.message-evidence button { padding: 0; border: 0; background: transparent; color: var(--blue); font-weight: 600; text-align: left; }
+.message-evidence p { margin-top: 6px; }
+.message-evidence blockquote { margin: 8px 0 0 12px; padding-left: 12px; border-left: 2px solid var(--line); color: var(--muted); font-size: 13px; }
 .citation-button { appearance: none; border: 0; cursor: pointer; }
 .message-papers { margin-top: 20px; }
 .message-papers .ranked-panel { border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; }
@@ -239,6 +246,10 @@ dialog.paper-drawer[open] { display: flex; flex-direction: column; }
 .conversation-composer { display: grid; gap: 10px; padding: 16px; }
 .conversation-composer label { color: var(--ink); font-weight: 600; }
 .conversation-composer textarea { width: 100%; min-height: 92px; resize: vertical; padding: 12px; border: 1px solid #cbd4cd; border-radius: 5px; background: var(--paper); color: var(--ink); font: inherit; }
+.composer-admin-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 12px 0 0; border: 0; border-top: 1px solid var(--line-soft); }
+.composer-admin-controls legend { padding: 0 8px 0 0; color: var(--muted); font-size: 12px; }
+.composer-admin-controls label { display: grid; gap: 5px; font-size: 12px; }
+.composer-admin-controls select { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 5px; padding: 7px 9px; background: var(--paper); color: var(--ink); font: inherit; }
 .composer-actions { justify-content: space-between; color: var(--muted); font-size: 12px; }
 .composer-actions .research-button { height: 42px; }
 .conversation-empty, .conversation-error, .research-disclaimer { color: var(--muted); }
@@ -287,6 +298,7 @@ dialog.paper-drawer[open] { display: flex; flex-direction: column; }
   .conversation-header-actions { width: 100%; }.conversation-header-actions button { flex: 1; }
   .conversation-user, .conversation-assistant, .conversation-progress { margin-right: 0; margin-left: 0; }
   .conversation-message { padding: 16px; }.composer-actions { align-items: stretch; flex-direction: column; }.composer-actions .research-button { width: 100%; }
+  .composer-admin-controls { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
