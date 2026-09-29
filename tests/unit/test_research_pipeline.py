@@ -64,6 +64,13 @@ class FakeBM25:
         return [(35100001, 8.0), (35100002, 4.0), (35100003, 2.0)]
 
 
+class UnavailableSemanticVerifier:
+    available = False
+
+    def verify(self, synthesis, records):
+        raise AssertionError("Unavailable semantic verifier must not be called")
+
+
 def test_rrf_deduplicates_within_channel_and_combines_ranks():
     scores = reciprocal_rank_fusion(
         {"dense_original": ["1", "1", "2"], "bm25": ["2", "1"]}, k=60
@@ -384,7 +391,9 @@ def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span
             return SynthesisResult(generated_claim, "nvidia_nim", None, audit)
 
     service = make_test_service(judge=AlwaysSufficientJudge())
-    service._synthesizer = UnverifiedGeneratedSynthesizer(semantic_verifier=None)
+    service._synthesizer = UnverifiedGeneratedSynthesizer(
+        semantic_verifier=UnavailableSemanticVerifier()
+    )
     evidence = EvidenceRecord(
         pmid="12345", key_findings=source_span, supporting_text_spans=[source_span]
     )
@@ -401,7 +410,9 @@ def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span
 def test_evidence_only_exact_span_fallback_is_supported_without_semantic_service():
     source_span = "Drug A reduced kidney disease progression among adults with diabetes."
     service = make_test_service(judge=AlwaysSufficientJudge())
-    service._synthesizer = EvidenceSynthesizer(semantic_verifier=None)
+    service._synthesizer = EvidenceSynthesizer(
+        semantic_verifier=UnavailableSemanticVerifier()
+    )
     evidence = EvidenceRecord(
         pmid="12345", key_findings=source_span, supporting_text_spans=[source_span]
     )
