@@ -790,6 +790,10 @@ class ResearchService:
                         "cited_pmids": [],
                         "citation_precision": 1.0,
                     }
+            if answer_status == AnswerStatus.INSUFFICIENT and not workflow.technical_failure and not response_gaps:
+                response_gaps.append(
+                    "No retrieved claim passed the citation and semantic verification gates."
+                )
             workflow.stages.append(
                 {
                     "stage": "citation_verification",

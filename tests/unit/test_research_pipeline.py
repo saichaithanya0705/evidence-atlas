@@ -450,6 +450,48 @@ def test_answer_from_evidence_releases_no_semantically_rejected_claim():
     assert "insufficient" in response.synthesis.casefold()
 
 
+def test_research_semantic_release_rejection_adds_gap_and_audit_counts_it():
+    from backend.app.models.request_response import ClaimVerification
+    from backend.app.workflow.synthesis import EvidenceSynthesizer, _claims
+
+    class TwoStudyHybrid(FakeHybrid):
+        def search(self, plan, top_k):
+            return [make_candidate(pmid="35100001"), make_candidate(pmid="35100002")]
+
+    class RejectAllSemanticClaims:
+        available = True
+
+        def verify(self, synthesis, records):
+            return [
+                ClaimVerification(
+                    claim_index=index, supported=False, supporting_pmids=[],
+                    rationale="Claim failed release verification.",
+                )
+                for index, _claim in enumerate(_claims(synthesis))
+            ]
+
+    service = make_test_service(
+        judge=AlwaysSufficientJudge(), hybrid=TwoStudyHybrid(),
+        synthesizer=EvidenceSynthesizer(semantic_verifier=RejectAllSemanticClaims()),
+    )
+    events = []
+
+    response = service.research(
+        "Empagliflozin diabetes kidney outcomes", max_loops=0,
+        request_id="semantic-rejection-gap", event_sink=lambda name, payload: events.append((name, payload)),
+    )
+
+    judge_event = next(payload for name, payload in events if name == "evidence_judged")
+    release_event = next(payload for name, payload in events if name == "answer_released")
+    assert judge_event["grade"] == "SUFFICIENT"
+    assert judge_event["missing_count"] == 0 and judge_event["conflict_count"] == 0
+    assert response.answer_status is AnswerStatus.INSUFFICIENT
+    assert response.evidence_gaps
+    assert "No retrieved claim passed the citation and semantic verification gates." in response.evidence_gaps
+    assert release_event["status"] == "INSUFFICIENT"
+    assert release_event["gap_count"] == len(response.evidence_gaps)
+
+
 def test_failed_gap_reviewer_uses_deterministic_correction_and_maps_limited():
     service = make_test_service()
     contexts = []
@@ -532,6 +574,7 @@ def test_retrieval_provider_failure_is_failed_not_insufficient_evidence():
     assert response.answer_status == AnswerStatus.FAILED
     assert "technical failure" in response.synthesis.casefold()
     assert "insufficient" not in response.synthesis.casefold()
+    assert response.evidence_gaps == []
     assert trace["stop_reason"] == "retrieval_failed"
 
 
