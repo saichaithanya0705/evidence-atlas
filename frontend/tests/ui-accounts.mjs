@@ -22,7 +22,7 @@ async function scenario(role, width) {
     const turnId = `visual-turn-${nextTurnId++}`;
     const evidence = { pmid: '12345', title: visualPaper.title, key_findings: `Visual finding for ${message}`, outcome: 'Study outcome', limitations: 'Synthetic fixture limitation', supporting_text_spans: [`Visual supporting span for ${message}`] };
     const result = { conversation_id: conversationId, turn_id: turnId, action: 'RESEARCH', answer_status: 'SUPPORTED', assistant_message: `VISUAL TEST DATA for ${message}. [PMID: 12345]`, cited_pmids: ['12345'], evidence_table: [evidence], retrieved_papers: [visualPaper], evidence_gaps: [], consensus_level: 'consensus', progress_summary: 'Synthetic UI fixture completed.', request_id: `visual-run-${turnId}` };
-    const savedTurn = { turn_id: turnId, sequence: conversations.get(conversationId).turns.length + 1, user_message: message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', public_response: { cited_pmids: result.cited_pmids, evidence_table: result.evidence_table, retrieved_papers: result.retrieved_papers, evidence_gaps: result.evidence_gaps, consensus_level: result.consensus_level } };
+    const savedTurn = { turn_id: turnId, sequence: conversations.get(conversationId).turns.length + 1, user_message: message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', result };
     conversations.get(conversationId).turns.push(savedTurn);
     return result;
   }
@@ -147,6 +147,8 @@ async function scenario(role, width) {
     else await page.locator('.evidence-toggle').click();
     await page.reload();
     await page.getByText('VISUAL TEST DATA for kidney outcomes.', { exact: false }).waitFor();
+    await page.getByRole('button', { name: 'Illustrative research record' }).last().waitFor();
+    await page.getByText('Visual finding for kidney outcomes', { exact: true }).waitFor();
     await page.locator('.citation-button').last().click();
     await page.getByRole('tab', { name: /Illustrative research record/i }).waitFor();
     await page.getByRole('tabpanel').getByText('Visual supporting span for kidney outcomes', { exact: true }).waitFor();
