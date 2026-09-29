@@ -49,14 +49,24 @@ class ConversationAgentDecision(_StrictModel):
         if self.action is AgentAction.RESEARCH:
             if self.standalone_query is None or self.complexity_hint is None:
                 raise ValueError("RESEARCH requires a standalone query and complexity hint")
+            if self.message is not None or self.referenced_turn_ids:
+                raise ValueError("RESEARCH cannot include a message or referenced turns")
         elif self.action in (AgentAction.CLARIFY, AgentAction.ABSTAIN):
             if self.message is None:
                 raise ValueError("CLARIFY and ABSTAIN require a user-facing message")
-            if self.standalone_query is not None:
-                raise ValueError("CLARIFY and ABSTAIN cannot include a standalone query")
+            if (
+                self.standalone_query is not None
+                or self.complexity_hint is not None
+                or self.referenced_turn_ids
+            ):
+                raise ValueError(
+                    "CLARIFY and ABSTAIN cannot include a query, complexity hint, or referenced turns"
+                )
         elif self.action is AgentAction.ANSWER_FROM_EVIDENCE:
             if not self.referenced_turn_ids or self.standalone_query is None:
                 raise ValueError("ANSWER_FROM_EVIDENCE requires referenced turns and a standalone question")
+            if self.complexity_hint is not None or self.message is not None:
+                raise ValueError("ANSWER_FROM_EVIDENCE cannot include a complexity hint or message")
         return self
 
 

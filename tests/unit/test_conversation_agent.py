@@ -263,6 +263,71 @@ def test_provider_failure_clarifies_deictic_message_instead_of_guessing():
     assert "that" in result.message.casefold()
 
 
+@pytest.mark.parametrize("fragment", ["Why?", "What are the side effects?"])
+def test_provider_failure_clarifies_short_or_topic_omitting_question_fragments(fragment):
+    from backend.app.conversation.agent import ConversationAgent
+
+    result = ConversationAgent(
+        settings(), completion_client=FakeCompletionClient(error=TimeoutError())
+    ).plan_turn(fragment, ConversationHistoryWindow(current_message=fragment))
+
+    assert result.action is AgentAction.CLARIFY
+    assert result.standalone_query is None
+    assert result.message
+
+
+def test_provider_failure_keeps_biomedical_question_with_a_named_topic_actionable():
+    from backend.app.conversation.agent import ConversationAgent
+
+    question = "What are the side effects of metformin?"
+    result = ConversationAgent(
+        settings(), completion_client=FakeCompletionClient(error=TimeoutError())
+    ).plan_turn(question, ConversationHistoryWindow(current_message=question))
+
+    assert result.action is AgentAction.RESEARCH
+    assert result.standalone_query == question
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        json.dumps(
+            {
+                "action": "RESEARCH",
+                "standalone_query": "aspirin cardiovascular outcomes",
+                "complexity_hint": "SIMPLE",
+                "referenced_turn_ids": [],
+                "decision_summary": "Invalid research combination",
+                "message": "Unexpected message",
+            }
+        ),
+        json.dumps(
+            {
+                "action": "CLARIFY",
+                "standalone_query": None,
+                "complexity_hint": "SIMPLE",
+                "referenced_turn_ids": [],
+                "decision_summary": "Invalid clarification combination",
+                "message": "Which population?",
+            }
+        ),
+    ],
+    ids=["research-with-message", "clarify-with-complexity"],
+)
+def test_invalid_action_combinations_fall_back_instead_of_returning_model_decision(content):
+    from backend.app.conversation.agent import ConversationAgent
+
+    result = ConversationAgent(settings(), completion_client=FakeCompletionClient(content)).plan_turn(
+        "aspirin cardiovascular outcomes",
+        ConversationHistoryWindow(current_message="aspirin cardiovascular outcomes"),
+    )
+
+    assert result.action is AgentAction.RESEARCH
+    assert result.standalone_query == "aspirin cardiovascular outcomes"
+    assert result.message is None
+    assert result.decision_summary == "Used the independently actionable current message after planner failure."
+
+
 def test_gap_review_rejects_proposal_with_filter_or_budget_fields():
     from backend.app.conversation.agent import ConversationAgent
 

@@ -24,6 +24,17 @@ _CONTEXT_DEPENDENT = re.compile(
     r"\bwhat about\b|\bhow about\b|\bdo the same\b|\band those\b",
     re.I,
 )
+_SHORT_INTERROGATIVE = re.compile(r"^\s*(why|how|what|which|where|when|who)\b", re.I)
+_TOPIC_WORDS = {
+    "benefit", "benefits", "cause", "causes", "diagnosis", "dose", "dosage", "effect", "effects",
+    "effectiveness", "efficacy", "mechanism", "mechanisms", "outcome", "outcomes", "prevention",
+    "prognosis", "risk", "risks", "safety", "side", "symptom", "symptoms", "therapy", "treatment",
+    "treatments",
+}
+_QUESTION_FILLER_WORDS = {
+    "a", "all", "an", "any", "are", "common", "expected", "general", "generally", "is", "major",
+    "of", "overall", "possible", "potential", "reported", "serious", "the", "what", "which",
+}
 
 
 class ConversationAgent:
@@ -119,7 +130,16 @@ class ConversationAgent:
 
     @staticmethod
     def _is_independently_actionable(message: str) -> bool:
-        return bool(message.strip()) and _CONTEXT_DEPENDENT.search(message) is None
+        if not message.strip() or _CONTEXT_DEPENDENT.search(message) is not None:
+            return False
+        words = re.findall(r"[a-z0-9]+", message.casefold())
+        if len(words) <= 2 and _SHORT_INTERROGATIVE.search(message):
+            return False
+        if _TOPIC_WORDS.intersection(words):
+            substantive_words = set(words) - _TOPIC_WORDS - _QUESTION_FILLER_WORDS
+            if not substantive_words:
+                return False
+        return True
 
     @staticmethod
     def _fallback(message: str) -> ConversationAgentDecision:
