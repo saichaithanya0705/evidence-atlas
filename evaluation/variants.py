@@ -22,6 +22,7 @@ _DENSE_SETTINGS = (
     "DENSE_TOP_K",
     "MEDCPT_QUERY_ENCODER",
     "MEDCPT_ALLOW_MOCK",
+    "MODELS_CACHE_DIR",
     "DEVICE",
     "EMBEDDING_DIMENSION",
     "QDRANT_COLLECTION_NAME",
@@ -125,7 +126,18 @@ def _material_settings(settings: Any, names: Sequence[str]) -> dict[str, Any]:
             netloc = f"[{hostname}]" if ":" in hostname else hostname
             if port is not None:
                 netloc = f"{netloc}:{port}"
-            value = urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+            safe_segments = {
+                "v1", "v2", "v3", "api", "openai", "nim", "chat",
+                "completions", "embeddings", "responses", "models",
+                "inference", "generate", "rerank", "health", "status",
+            }
+            path_parts = parsed.path.split("/")
+            safe_path = "/".join(
+                part if not part or part.casefold() in safe_segments or (part.startswith("{") and part.endswith("}"))
+                else "{redacted}"
+                for part in path_parts
+            )
+            value = urlunsplit((parsed.scheme, netloc, safe_path, "", ""))
         result[name] = value
     return result
 

@@ -240,6 +240,59 @@ def test_configuration_hash_ignores_nonmaterial_settings_and_secret_values():
     assert "another-user" not in serialized
 
 
+@pytest.mark.parametrize("variant_name", ["dense_only", "hybrid", "reranked", "agentic"])
+def test_model_cache_directory_changes_every_variant_hash(variant_name):
+    settings = SimpleNamespace(MODELS_CACHE_DIR="cache-a")
+    variants = {
+        "dense_only": lambda: DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings),
+        "hybrid": lambda: HybridVariant(planner=make_plan, retriever=Retriever(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings),
+        "reranked": lambda: RerankedVariant(planner=make_plan, retriever=Retriever(), reranker=Reranker(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings),
+        "agentic": lambda: AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings),
+    }
+    before = variants[variant_name]()
+    before_hash = configuration_hash(before._configuration())
+    settings.MODELS_CACHE_DIR = "cache-b"
+    after = variants[variant_name]()
+
+    assert before_hash != configuration_hash(after._configuration())
+
+
+def test_resume_reruns_when_model_cache_directory_changes(tmp_path):
+    settings = SimpleNamespace(MODELS_CACHE_DIR="cache-a")
+    variant = DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    output = tmp_path / "model-cache-resume"
+    run_evaluation([entry()], {"dense_only": variant}, output_dir=output)
+    settings.MODELS_CACHE_DIR = "cache-b"
+
+    result = run_evaluation([entry()], {"dense_only": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 1, "skipped": 0}
+
+
+def test_endpoint_path_credentials_are_redacted_and_do_not_affect_hash():
+    settings = SimpleNamespace(NVIDIA_BASE_URL="https://api.example.test/v1/chat/completions/secret-path-credential-abc123")
+    before = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    before_config = before._configuration()
+    before_hash = configuration_hash(before_config)
+    settings.NVIDIA_BASE_URL = "https://api.example.test/v1/chat/completions/different-path-credential-xyz987"
+    after = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    serialized = json.dumps(before_config)
+
+    assert before_hash == configuration_hash(after._configuration())
+    assert "secret-path-credential-abc123" not in serialized
+    assert "v1" in serialized and "chat" in serialized and "completions" in serialized
+
+
+def test_endpoint_static_path_change_remains_material():
+    settings = SimpleNamespace(NVIDIA_BASE_URL="https://api.example.test/v1/chat/completions")
+    chat = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    chat_hash = configuration_hash(chat._configuration())
+    settings.NVIDIA_BASE_URL = "https://api.example.test/v1/embeddings"
+    embeddings = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+
+    assert chat_hash != configuration_hash(embeddings._configuration())
+
+
 @pytest.mark.parametrize(
     "change",
     [
