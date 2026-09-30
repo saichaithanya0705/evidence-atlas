@@ -86,6 +86,23 @@ export function exportResearchJson(research, trace) {
   );
 }
 
+export function exportPublicResearchJson(research) {
+  const payload = {
+    query: research?.query ?? null,
+    synthesis: research?.synthesis ?? null,
+    cited_pmids: research?.cited_pmids ?? [],
+    consensus_level: research?.consensus_level ?? null,
+    evidence_gaps: research?.evidence_gaps ?? [],
+    retrieved_papers: research?.retrieved_papers ?? [],
+    evidence_table: research?.evidence_table ?? [],
+  };
+  downloadFile(
+    "evidence-atlas-research.json",
+    JSON.stringify(payload, null, 2),
+    "application/json;charset=utf-8",
+  );
+}
+
 export function pubmedUrl(pmid) {
   return "https://pubmed.ncbi.nlm.nih.gov/" + encodeURIComponent(pmid) + "/";
 }

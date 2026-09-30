@@ -184,9 +184,12 @@ class ConversationTurnResponse(_StrictModel):
     consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"]
     interpretation: PublicInterpretation | None = None
     progress_summary: str = Field(max_length=500)
-    request_id: str = Field(max_length=100)
 
     @field_validator("cited_pmids", "evidence_gaps")
     @classmethod
     def trim_string_lists(cls, values: list[str]) -> list[str]:
         return _trim_string_list(values)
+
+
+class AdminConversationTurnResponse(ConversationTurnResponse):
+    request_id: str = Field(max_length=100)

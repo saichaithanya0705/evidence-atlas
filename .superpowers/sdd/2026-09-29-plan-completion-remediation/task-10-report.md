@@ -29,3 +29,21 @@ Administrators get a collapsed AuditTrail for each completed turn. It requests `
 - Existing evidence tabs, conversation switching, account navigation, authentication, and responsive layouts remained covered by the UI suites.
 - The installed Node.js is 20.18.0 while Vite requests 20.19+ or 22.12+. The build completed successfully with that engine warning. The backend suite emitted existing FastAPI lifecycle and local Qdrant warnings.
 - The commit hash is supplied in the completion handoff because a commit cannot contain its own final content hash without changing that hash.
+
+## Review follow-up: immediate turn response and export boundary
+
+The review found that newly submitted ordinary turns still received `request_id` in the shared response model, and the JSON export helper emitted request/audit keys even when passed ordinary-user state. The public `ConversationTurnResponse` now excludes the identifier; `AdminConversationTurnResponse` adds it only for administrators. The turn route selects explicit role-specific serialization, while the service continues retaining the audit link in storage for the admin-only restored-history projection. Ordinary JSON export now uses a dedicated public allowlist, so stale request IDs, trace URLs, and traces are not copied into the file. Administrator trace fetching remains collapsed/lazy.
+
+OpenAPI documents both the public and administrator variants for GET detail and POST turns using schema-only unions; runtime behavior does not serialize through a union. Regression tests assert ordinary POST omits and admin POST includes `request_id`, both paths appear in the documented schemas, and the browser fixture's ordinary export omits both `request_id` and `audit_trace` despite the response fixture containing a request ID.
+
+### Follow-up TDD and verification
+
+- RED: focused route tests first failed because ordinary POST included `request_id` and GET detail OpenAPI referenced only `ConversationDetailResponse`.
+- GREEN: focused auth/conversation tests passed (27 passed); conversation UI passed with export-ID assertions; accounts UI passed across user/admin viewports; build passed.
+- `npm run test:ui-conversations` - PASS, including ordinary export checks with stale request ID in the API fixture.
+- `npm run test:ui-accounts` - PASS for user and administrator at 1440, 768, 390, and 320 pixels.
+- `npm run build` - PASS.
+- Focused auth/conversation backend tests - 27 passed.
+- Full backend suite - 1103 passed, 2 skipped, 9 warnings.
+- `git diff --check` - PASS.
+- Environment concern: Node.js 20.18.0 is below Vite's stated 20.19+ requirement; tests and build completed successfully with an engine warning.

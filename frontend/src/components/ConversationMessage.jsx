@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { getTrace } from "../api.js";
-import { exportResearchJson } from "../utils.js";
+import { exportPublicResearchJson, exportResearchJson } from "../utils.js";
 import AuditTrail from "./AuditTrail.jsx";
 import EvidenceTable from "./EvidenceTable.jsx";
 import InterpretationPanel from "./InterpretationPanel.jsx";
@@ -39,25 +39,31 @@ export default function ConversationMessage({ role, content, status, action, res
   }, [audit.loading, isAdmin, result?.request_id]);
 
   const evidenceRows = result?.evidence_table || [];
-  const safeExport = useCallback(() => exportResearchJson({
-    request_id: result?.request_id,
-    query: result?.query,
-    synthesis: content,
-    cited_pmids: result?.cited_pmids || [],
-    consensus_level: result?.consensus_level,
-    evidence_gaps: result?.evidence_gaps || [],
-    retrieved_papers: (result?.retrieved_papers || []).map(paper => ({
-      pmid: paper.pmid, title: paper.title, abstract: paper.abstract, journal: paper.journal,
-      year: paper.year, authors: paper.authors, mesh_terms: paper.mesh_terms, study_type: paper.study_type,
-    })),
-    evidence_table: evidenceRows.map(row => ({
-      pmid: row.pmid, title: row.title, year: row.year, study_design: row.study_design,
-      population: row.population, intervention: row.intervention, comparator: row.comparator,
-      outcome: row.outcome, key_findings: row.key_findings, limitations: row.limitations,
-      supporting_text_spans: row.supporting_text_spans, retrieval_channels: row.retrieval_channels,
-      subquestion_ids: row.subquestion_ids,
-    })),
-  }, isAdmin ? audit.trace : null), [audit.trace, content, evidenceRows, isAdmin, result]);
+  const safeExport = useCallback(() => {
+    const exportPayload = {
+      query: result?.query,
+      synthesis: content,
+      cited_pmids: result?.cited_pmids || [],
+      consensus_level: result?.consensus_level,
+      evidence_gaps: result?.evidence_gaps || [],
+      retrieved_papers: (result?.retrieved_papers || []).map(paper => ({
+        pmid: paper.pmid, title: paper.title, abstract: paper.abstract, journal: paper.journal,
+        year: paper.year, authors: paper.authors, mesh_terms: paper.mesh_terms, study_type: paper.study_type,
+      })),
+      evidence_table: evidenceRows.map(row => ({
+        pmid: row.pmid, title: row.title, year: row.year, study_design: row.study_design,
+        population: row.population, intervention: row.intervention, comparator: row.comparator,
+        outcome: row.outcome, key_findings: row.key_findings, limitations: row.limitations,
+        supporting_text_spans: row.supporting_text_spans, retrieval_channels: row.retrieval_channels,
+        subquestion_ids: row.subquestion_ids,
+      })),
+    };
+    if (!isAdmin) {
+      exportPublicResearchJson(exportPayload);
+      return;
+    }
+    exportResearchJson({ ...exportPayload, request_id: result?.request_id }, audit.trace);
+  }, [audit.trace, content, evidenceRows, isAdmin, result]);
 
   return <article className={`conversation-message conversation-${role}${failed ? " conversation-failed" : ""}`}>
     <div className="conversation-message-heading"><strong>{isAssistant ? "Evidence Atlas" : "You"}</strong>{status && action !== "CLARIFY" && <span className={failed ? "answer-status failed" : insufficient ? "answer-status insufficient" : "answer-status"}>{status}</span>}</div>

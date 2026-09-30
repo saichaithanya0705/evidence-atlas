@@ -12,6 +12,7 @@ from .models import (
     ConversationTurnRecord,
     ConversationTurnRequest,
     ConversationTurnResponse,
+    AdminConversationTurnResponse,
     CorrectiveResearchProposal,
     EvidenceGapContext,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "ConversationTurnRecord",
     "ConversationTurnRequest",
     "ConversationTurnResponse",
+    "AdminConversationTurnResponse",
     "CorrectiveResearchProposal",
     "EvidenceGapContext",
 ]

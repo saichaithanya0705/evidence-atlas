@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from backend.app.conversation.models import (
+    AdminConversationTurnResponse,
     AgentAction,
     AnswerStatus,
     ConversationAgentDecision,
@@ -161,7 +162,7 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
         conversation_id="c-1", turn_id="t-2", action="RESEARCH", answer_status="LIMITED",
         assistant_message="Limited findings", cited_pmids=[], evidence_table=[], retrieved_papers=[],
         evidence_gaps=["Safety evidence missing"], consensus_level="insufficient",
-        progress_summary="Research complete", request_id="req-2",
+        progress_summary="Research complete",
     )
     assert created.conversation_id == summary.conversation_id
     assert detail.turns[0].sequence == 1
@@ -172,6 +173,13 @@ def test_conversation_response_types_validate_and_serialize_public_contracts():
     assert proposal.complexity_hint == "MODERATE"
     assert history.recent_turns[0].content == "Question"
     assert response.model_dump(mode="json")["answer_status"] == "LIMITED"
+    assert "request_id" not in response.model_dump(mode="json")
+    admin_response = AdminConversationTurnResponse(
+        conversation_id="c-1", turn_id="t-2", action="RESEARCH", answer_status="LIMITED",
+        assistant_message="Limited findings", consensus_level="insufficient",
+        progress_summary="Research complete", request_id="req-2",
+    )
+    assert admin_response.model_dump(mode="json")["request_id"] == "req-2"
 
 
 def test_conversation_turn_public_result_rejects_internal_fields():
@@ -210,7 +218,7 @@ def test_conversation_interpretation_contract_is_safe_and_persistable():
     response = ConversationTurnResponse(
         conversation_id="c-1", turn_id="t-2", action="RESEARCH", answer_status="SUPPORTED",
         assistant_message="Supported", interpretation=interpretation, consensus_level="consensus",
-        progress_summary="Research complete", request_id="req-2",
+        progress_summary="Research complete",
     )
     assert response.model_dump(mode="json")["interpretation"] == interpretation.model_dump(mode="json")
     with pytest.raises(ValidationError):

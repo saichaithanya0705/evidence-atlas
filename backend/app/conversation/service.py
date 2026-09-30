@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from backend.app.conversation.models import (
     AdminConversationDetailResponse,
+    AdminConversationTurnResponse,
     AdminConversationTurnRecord,
     ConversationCreateResponse,
     ConversationDetailResponse,
@@ -249,7 +250,7 @@ class ConversationService:
             raise ValueError("No validated evidence is available from the referenced turns")
         return candidates, evidence
 
-    def run_turn(self, conversation_id: str, account: dict, request: ConversationTurnRequest) -> ConversationTurnResponse:
+    def run_turn(self, conversation_id: str, account: dict, request: ConversationTurnRequest) -> ConversationTurnResponse | AdminConversationTurnResponse:
         is_admin = account.get("role") == "admin"
         supplied_controls = {"year_min", "year_max", "study_types", "max_loops"} & request.model_fields_set
         if supplied_controls and not is_admin:
@@ -345,7 +346,12 @@ class ConversationService:
                 "progress_summary": "Evidence review completed." if research_response else "A follow-up detail is needed.",
                 "request_id": run_id,
             }
-            response = ConversationTurnResponse.model_validate(public_response)
+            response_payload = dict(public_response)
+            response_payload.pop("request_id", None)
+            response_type = AdminConversationTurnResponse if is_admin else ConversationTurnResponse
+            if is_admin:
+                response_payload["request_id"] = run_id
+            response = response_type.model_validate(response_payload)
             self.audit.finish(run_id, "completed", public_payload, None)
             self.store.complete_turn(
                 turn_id, agent_action=decision.action.value, standalone_query=standalone_query,

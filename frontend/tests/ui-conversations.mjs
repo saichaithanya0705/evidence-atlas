@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
@@ -114,6 +115,13 @@ try {
   assert.equal(await publicConversation.getByText('Covered', { exact: true }).count(), 2, 'qualitative coverage appears in interpretation and evidence table');
   await publicConversation.getByText('bm25', { exact: true }).waitFor();
   await publicConversation.getByText(/Supporting span for first question/).waitFor();
+  const [publicExportDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    publicConversation.getByRole('button', { name: 'JSON' }).click(),
+  ]);
+  const publicExport = JSON.parse(await readFile(await publicExportDownload.path(), 'utf8'));
+  assert.equal(Object.hasOwn(publicExport, 'request_id'), false, 'ordinary exports omit stale request IDs');
+  assert.equal(Object.hasOwn(publicExport, 'audit_trace'), false, 'ordinary exports omit stale audit trace data');
   for (const secret of ['PRIVATE ROUTER REASONING', '0.98', '0.97', 'PRIVATE GRAPH NODE', 'PRIVATE TRACE FIELD', 'ADMIN TRACE ROUTING DETAILS']) assert.equal(await publicConversation.getByText(secret, { exact: false }).count(), 0, `ordinary view must hide ${secret}`);
   assert.equal(await publicConversation.getByRole('button', { name: /Research audit trail/i }).count(), 0, 'ordinary users see no trace control');
   assert.equal(await publicConversation.getByRole('heading', { name: 'Ranked papers' }).count(), 0, 'ordinary users see no ranked paper surface');

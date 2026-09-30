@@ -150,9 +150,61 @@ def test_turn_route_returns_the_completed_public_response(client):
     assert response.json()["action"] == "CLARIFY"
     assert response.json()["answer_status"] == "INSUFFICIENT"
     assert response.json()["assistant_message"] == "Please name the outcome."
+    assert "request_id" not in response.json()
     restored = client.get(f"/conversations/{conversation_id}", headers=headers).json()["turns"][0]
     assert restored["result"]["cited_pmids"] == []
     assert "raw_prompt" not in restored["result"]
+
+
+def test_admin_turn_post_includes_audit_request_id(client):
+    from backend.app.conversation.models import ConversationAgentDecision
+    from backend.app.conversation.routes import get_conversation_service
+    from backend.app.conversation.service import ConversationService
+    from backend.app.models.request_response import AgentAction
+    from backend.app.storage.audits import AuditStore
+
+    login = client.post("/auth/login", json={"username": "administrator", "password": "admin-password-123"}, headers={"Origin": "http://testserver"})
+    assert login.status_code == 200
+    headers = {"Origin": "http://testserver", "X-CSRF-Token": client.cookies.get("evidence_csrf")}
+    conversation_id = client.post("/conversations", json={}, headers=headers).json()["conversation_id"]
+    path = get_settings().APP_DATABASE_PATH
+
+    class FakeAgent:
+        def plan_turn(self, message, history):
+            return ConversationAgentDecision(
+                action=AgentAction.CLARIFY, decision_summary="A specific outcome is needed.",
+                message="Please name the outcome.",
+            )
+
+    class NoResearch:
+        pass
+
+    service = ConversationService(store=ConversationStore(path), audit=AuditStore(path), agent=FakeAgent(), research=NoResearch())
+    client.app.dependency_overrides[get_conversation_service] = lambda: service
+    try:
+        response = client.post(f"/conversations/{conversation_id}/turns", json={"message": "What about it?"}, headers=headers)
+    finally:
+        client.app.dependency_overrides.pop(get_conversation_service, None)
+
+    assert response.status_code == 200
+    assert response.json()["request_id"]
+
+
+def test_conversation_detail_openapi_documents_role_gated_admin_projection(client):
+    operation = client.get("/openapi.json").json()["paths"]["/conversations/{conversation_id}"]["get"]
+    response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "anyOf" in response_schema
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    branch_names = {branch["$ref"].rsplit("/", 1)[-1] for branch in response_schema["anyOf"]}
+    assert branch_names == {"ConversationDetailResponse", "AdminConversationDetailResponse"}
+    assert "request_id" not in schemas["ConversationTurnRecord"]["properties"]
+    assert "request_id" in schemas["AdminConversationTurnRecord"]["properties"]
+    post_operation = client.get("/openapi.json").json()["paths"]["/conversations/{conversation_id}/turns"]["post"]
+    post_schema = post_operation["responses"]["200"]["content"]["application/json"]["schema"]
+    post_names = {branch["$ref"].rsplit("/", 1)[-1] for branch in post_schema["anyOf"]}
+    assert post_names == {"ConversationTurnResponse", "AdminConversationTurnResponse"}
+    assert "request_id" not in schemas["ConversationTurnResponse"]["properties"]
+    assert "request_id" in schemas["AdminConversationTurnResponse"]["properties"]
 
 
 def test_failed_turn_remains_failed_after_api_reload(client):

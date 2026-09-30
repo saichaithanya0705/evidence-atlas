@@ -1,5 +1,7 @@
 """Session protected conversation endpoints."""
 
+from typing import Union
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -7,6 +9,8 @@ from fastapi.responses import JSONResponse
 from backend.app.auth.security import require_ready_account, require_ready_csrf
 from backend.app.conversation.agent import ConversationAgent
 from backend.app.conversation.models import (
+    AdminConversationDetailResponse,
+    AdminConversationTurnResponse,
     ConversationCreateResponse,
     ConversationDetailResponse,
     ConversationTurnRequest,
@@ -55,7 +59,10 @@ def list_conversations(
     return service.list(account, limit=limit, offset=offset)
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+@router.get(
+    "/conversations/{conversation_id}", response_model=None,
+    responses={200: {"model": Union[ConversationDetailResponse, AdminConversationDetailResponse], "description": "Public projection for ordinary users; audit-linked projection for administrators."}},
+)
 def conversation_detail(
     conversation_id: str,
     limit: int = Query(100, ge=1, le=100),
@@ -67,11 +74,14 @@ def conversation_detail(
     if result is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     if account.get("role") == "admin":
-        return JSONResponse(content=result.model_dump(mode="json"))
-    return result
+        return JSONResponse(content=AdminConversationDetailResponse.model_validate(result).model_dump(mode="json"))
+    return ConversationDetailResponse.model_validate(result)
 
 
-@router.post("/conversations/{conversation_id}/turns", response_model=ConversationTurnResponse)
+@router.post(
+    "/conversations/{conversation_id}/turns", response_model=None,
+    responses={200: {"model": Union[ConversationTurnResponse, AdminConversationTurnResponse], "description": "Public turn response for ordinary users; administrator response includes the audit request identifier."}},
+)
 async def run_conversation_turn(
     conversation_id: str,
     payload: ConversationTurnRequest,
@@ -79,6 +89,9 @@ async def run_conversation_turn(
     service=Depends(get_conversation_service),
 ):
     try:
-        return await run_in_threadpool(service.run_turn, conversation_id, account, payload)
+        result = await run_in_threadpool(service.run_turn, conversation_id, account, payload)
+        if account.get("role") == "admin":
+            return JSONResponse(content=AdminConversationTurnResponse.model_validate(result).model_dump(mode="json"))
+        return ConversationTurnResponse.model_validate(result)
     except ConversationBusyError as exc:
         raise HTTPException(status_code=409, detail="A turn is already running for this conversation") from exc

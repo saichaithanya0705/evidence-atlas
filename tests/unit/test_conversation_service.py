@@ -282,7 +282,7 @@ def test_answer_from_evidence_uses_only_persisted_validated_sources(tmp_path):
     assert [item.pmid for item in events[-1][3]] == ["12345"]
     assert second.action is AgentAction.ANSWER_FROM_EVIDENCE
     saved = store.detail_for_account(conversation["id"], account["id"])["turns"][0]
-    assert second.request_id == saved["audit_run_id"]
+    assert not hasattr(second, "request_id")
 
 
 @pytest.mark.parametrize("action", [AgentAction.CLARIFY, AgentAction.ABSTAIN])
