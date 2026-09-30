@@ -51,6 +51,6 @@ The saved-artifact runner refuses partial variants and refuses to publish when n
 
 The runner records aggregate diagnostics alongside per-query diagnostic artifacts. The report store enforces flat query artifact names and validates run IDs. No changes were made to `.env`, the active corpus, vector index, or public API models.
 
-Feature commit: recorded after commit.
+Feature commit: `975b80f` (`feat: add comprehensive research evaluation`).
 
 Concerns: the optional RAGAS import smoke remains blocked by the upstream `langchain-community` import path described above. All deterministic evaluation and backend tests pass.
