@@ -440,10 +440,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark", type=Path, default=Path("data/evaluation/benchmark_v2.json"))
     parser.add_argument("--artifacts-dir", type=Path, default=Path("data/evaluation/variants"))
-    parser.add_argument("--reports-dir", type=Path, default=Path("evaluation/reports"))
+    parser.add_argument("--variants", nargs="+", choices=("dense_only", "hybrid", "reranked", "agentic"),
+                        default=["dense_only", "hybrid", "reranked", "agentic"])
+    parser.add_argument("--reports-dir", "--output-dir", dest="reports_dir", type=Path, default=Path("evaluation/reports"))
     parser.add_argument("--run-id", help="Immutable report ID; defaults to a checksum-derived ID")
     parser.add_argument("--top-k", type=int, default=10)
     args = parser.parse_args(argv)
+    if len(args.variants) != 4 or set(args.variants) != {"dense_only", "hybrid", "reranked", "agentic"}:
+        parser.error("report promotion requires exactly all four variants: dense_only hybrid reranked agentic")
     try:
         run_id = args.run_id or f"eval-{file_checksum(args.benchmark)[:12]}-{stable_checksum({str(args.artifacts_dir): args.top_k})[:12]}"
         report = evaluate_saved_variants(args.benchmark, args.artifacts_dir, args.reports_dir, run_id=run_id, top_k=args.top_k)

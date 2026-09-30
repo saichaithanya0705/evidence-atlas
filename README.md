@@ -98,33 +98,16 @@ The normal launcher runs these steps in order. `data/manifests/` contains the as
 
 ## Evaluation
 
-Run the reproducible classical IR and router benchmark after the setup has built `data/processed/bm25_index.pkl`:
+The frozen 40-query benchmark is `data/evaluation/benchmark_v2.json`. Its labels use web-assisted PubMed source verification: PMID, title, abstract evidence, and local corpus identity were checked against official PubMed records. This is a small query-focused benchmark, not a representative PubMed sample or a clinical validation study. The active corpus and index contain 29,994 records.
+
+From the repository root, run all four comparable variants and promote the complete checksum-bound report:
 
 ```powershell
-python -m evaluation.run_evaluation --top-k 10 --output data/evaluation/latest.json
+.\.venv\Scripts\python.exe -m evaluation.ablation --benchmark data/evaluation/benchmark_v2.json --variant all --resume --output-dir data/evaluation/variants
+.\.venv\Scripts\python.exe -m evaluation.run_evaluation --benchmark data/evaluation/benchmark_v2.json --variants dense_only hybrid reranked agentic --output-dir evaluation/reports
 ```
 
-The frozen query set and relevance labels are in `data/evaluation/queries.json`. The report includes Recall@K, Precision@K, MRR@K, nDCG@K, and labeled router accuracy. The labels refer only to the bundled demo corpus; they do not establish real-world PubMed performance or medical correctness.
-
-For deterministic checks on saved `/research` response objects, pass a JSON list with this shape:
-
-```json
-[
-  {
-    "query": "example",
-    "synthesis": "A research summary [PMID: 12345].",
-    "cited_pmids": ["12345"],
-    "retrieved_papers": [{"pmid": "12345", "abstract": "Exact source abstract text."}],
-    "evidence_table": [{"pmid": "12345", "supporting_text_spans": ["Exact source abstract text."]}]
-  }
-]
-```
-
-```powershell
-python -m evaluation.run_evaluation --answers path\to\answers.json --output data/evaluation/latest.json
-```
-
-Citation checks measure whether each cited PMID appears in the retrieved evidence and whether its quoted span is an exact substring of that PMID's abstract. They do not judge whether the quote semantically supports the claim; human review remains necessary. Without `--answers`, the citation section is reported as `not_run`.
+The report includes Recall@10, Precision@10, MRR@10, nDCG@10, filter accuracy, latency, available citation checks, robustness deltas, and failure categories. The dense-only, hybrid, and reranked variants are retrieval-only, so their null answers and answer metrics marked `not_run` are expected and are not product failures. Each metric has an explicit `completed`, `not_run`, or `failed` status; unavailable values remain null with a reason. Reports and metrics are visible only to administrators through the **Evaluations** dashboard and `/admin/evaluations` API. Ordinary-user research views do not expose them. See [the measured report](docs/evaluation_report.md), [evaluation plan](docs/evaluation_plan.md), and [administrator demo](docs/demo_script.md) for the run ID, checksums, limitations, and repeatable walkthrough.
 
 ## Development commands
 
@@ -142,7 +125,7 @@ python -m pytest
 
 The application uses local files and embedded Qdrant storage. No Docker service or container is required.
 
-The active 29,939-point collection is larger than Qdrant's recommended embedded-local threshold of 20,000 points. It is correct and usable for this no-Docker workstation setup, but concurrent searches are slower and local payload indexes are not accelerated; a Qdrant server or managed Qdrant deployment is the appropriate production scaling path.
+The active 29,994-point collection is larger than Qdrant's recommended embedded-local threshold of 20,000 points. It is correct and usable for this no-Docker workstation setup, but concurrent searches are slower and local payload indexes are not accelerated; a Qdrant server or managed Qdrant deployment is the appropriate production scaling path.
 
 ## UI stress validation
 

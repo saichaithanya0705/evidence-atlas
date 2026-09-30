@@ -104,3 +104,25 @@ def test_runner_fails_closed_when_robustness_scorer_returns_empty_metrics(tmp_pa
     assert summary["status"] == result["status"]
     assert summary["reason"] == result["reason"]
     assert summary["queries"]["q1"] == query["variants"]["dense_only"]["robustness"]
+
+
+def test_task11_project_command_accepts_complete_variant_list_and_output_dir(tmp_path, monkeypatch):
+    from evaluation import run_evaluation
+
+    called = {}
+
+    def capture(benchmark, artifacts, reports, *, run_id, top_k):
+        called.update(benchmark=benchmark, artifacts=artifacts, reports=reports, run_id=run_id, top_k=top_k)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(run_evaluation, "evaluate_saved_variants", capture)
+    run_evaluation.main([
+        "--benchmark", "data/evaluation/benchmark_v2.json",
+        "--variants", "dense_only", "hybrid", "reranked", "agentic",
+        "--output-dir", str(tmp_path / "reports"),
+    ])
+
+    assert called["benchmark"].as_posix() == "data/evaluation/benchmark_v2.json"
+    assert called["artifacts"].as_posix() == "data/evaluation/variants"
+    assert called["reports"] == tmp_path / "reports"
+    assert called["run_id"].startswith("eval-")

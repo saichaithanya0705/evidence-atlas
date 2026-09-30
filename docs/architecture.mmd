@@ -1,0 +1,43 @@
+flowchart TD
+    subgraph Offline["Offline corpus and indexing"]
+        Raw["PubMed source records"] --> Prep["Normalize and deduplicate"]
+        Prep --> Corpus["29,994-record active corpus"]
+        Corpus --> Dense["MedCPT dense embeddings"]
+        Corpus --> BM25["BM25 sparse index"]
+        Corpus --> Mesh["MeSH dictionary and graph"]
+        Dense --> Qdrant["Qdrant dense and sparse vectors"]
+        BM25 --> Qdrant
+        Mesh --> Qdrant
+    end
+
+    subgraph Research["Online research workflow"]
+        User["Authenticated user query"] --> Understand["Query understanding and guarded route"]
+        Understand --> Plan["Bounded research-plan DAG"]
+        Plan --> Variants["Retrieval variants"]
+        Variants --> DenseOnly["Dense-only"]
+        Variants --> Hybrid["Hybrid: dense, BM25, MeSH"]
+        Variants --> Reranked["Hybrid pool plus cross-encoder reranking"]
+        Variants --> Agentic["Agentic: bounded research workflow"]
+        DenseOnly --> Corrective["Evidence sufficiency and corrective retrieval"]
+        Hybrid --> Corrective
+        Reranked --> Corrective
+        Agentic --> Corrective
+        Corrective --> Evidence["Evidence table with PMID and exact spans"]
+        Evidence --> Repair["Claim repair or abstention"]
+        Repair --> Citation["Citation and source-span validation"]
+        Citation --> Report["Grounded research response"]
+    end
+
+    Qdrant --> Variants
+    Mesh --> Understand
+
+    subgraph Projections["Response and evaluation boundaries"]
+        Report --> Public["Public projection: interpretation, evidence, sources"]
+        Report --> AdminResearch["Administrator research view: bounded trace"]
+        Evaluator["Offline saved-artifact evaluation"] --> Promoted["Checksum-validated report bundle"]
+        Promoted --> AdminOnly["Administrator-only evaluation API and dashboard"]
+    end
+
+    Public -. "excludes scores, traces, and evaluation metrics" .-> Ordinary["Ordinary-user research UI"]
+    AdminResearch --> AdminUI["Administrator audit view"]
+    AdminOnly --> AdminUI

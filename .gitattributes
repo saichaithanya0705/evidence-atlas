@@ -1,0 +1,2 @@
+# Report hashes are over raw bytes; preserve generated line endings in checkouts.
+evaluation/reports/** -text
