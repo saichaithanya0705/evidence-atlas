@@ -73,3 +73,32 @@ def test_markdown_metric_values_remain_agreeing_after_json_round_trip():
     report = _report(metrics={"latency": {"status": "completed", "value": {"count": 1, "min": 10.0, "median": 12.0, "mean": 12.0, "max": 14.0}, "reason": None}})
     markdown = render_markdown(report)
     validate_report_agreement(json.loads(json.dumps(report, sort_keys=True)), markdown)
+
+
+def test_admin_report_projection_exposes_only_documented_metrics_and_fields():
+    from backend.app.evaluation.service import _InvalidBundle, _project_report
+
+    report = {
+        "run_id": "run-1",
+        "benchmark_checksum": "a" * 64,
+        "corpus_checksum": "b" * 64,
+        "configuration_checksum": "c" * 64,
+        "variants": ["dense_only", "hybrid", "reranked", "agentic"],
+        "query_count": 0,
+        "metrics": {"dense_only.recall@5": {"status": "completed", "value": 0.5, "reason": None}},
+        "latency": {},
+        "failure_categories": {},
+        "robustness": {},
+        "limitations": [],
+        "prompt": "must not appear",
+        "model_output": "must not appear",
+    }
+    projected = _project_report(report, "d" * 64)
+    assert set(projected) == {
+        "run_id", "report_checksum", "benchmark_checksum", "corpus_checksum", "configuration_checksum",
+        "variants", "query_count", "metrics", "latency", "failure_categories", "robustness", "limitations",
+    }
+    assert projected["metrics"] == {"dense_only.recall@5": {"status": "completed", "value": 0.5, "reason": None}}
+    report["metrics"]["dense_only.prompt"] = {"status": "completed", "value": "private prompt", "reason": None}
+    with pytest.raises(_InvalidBundle):
+        _project_report(report, "d" * 64)

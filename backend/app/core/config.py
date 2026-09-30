@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     MESH_DICT_PATH: str = Field(default="./data/processed/mesh_dictionary.json")
     INDEX_MANIFEST_PATH: str = Field(default="./data/manifests/index_manifest.json")
     APP_DATABASE_PATH: str = Field(default="./data/app/evidence_atlas.sqlite3")
+    EVALUATION_REPORTS_DIR: str = Field(default="./evaluation/reports")
 
     # MedCPT Models & Inference
     MEDCPT_QUERY_ENCODER: str = Field(default="ncbi/MedCPT-Query-Encoder")

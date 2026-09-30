@@ -5,9 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.app.auth.security import require_admin
 from backend.app.core.config import get_settings
+from backend.app.evaluation.service import EvaluationList, EvaluationReport, get_evaluation, list_evaluations
 from backend.app.storage.audits import AuditStore
 
 router = APIRouter(prefix="/admin")
+
+
+@router.get("/evaluations", response_model=EvaluationList)
+def evaluations(administrator=Depends(require_admin)):
+    return list_evaluations()
+
+
+@router.get("/evaluations/{run_id:path}", response_model=EvaluationReport)
+def evaluation_detail(run_id: str, administrator=Depends(require_admin)):
+    return get_evaluation(run_id)
 
 
 def store():

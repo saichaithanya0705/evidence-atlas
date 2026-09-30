@@ -1,5 +1,8 @@
 """Regression checks for identity-based diagnostic access."""
 
+import hashlib
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,6 +18,7 @@ from backend.app.storage.database import initialize_db
 def client(tmp_path, monkeypatch):
     path = tmp_path / "boundary.sqlite3"
     monkeypatch.setenv("APP_DATABASE_PATH", str(path))
+    monkeypatch.setenv("EVALUATION_REPORTS_DIR", str(tmp_path / "evaluation-reports"))
     get_settings.cache_clear()
     initialize_db(path)
     store = AccountStore(path)
@@ -167,3 +171,122 @@ def test_reader_cannot_read_linked_admin_trace_or_internal_metadata(client, monk
 
     assert client.get("/admin/audits", headers=headers).status_code == 403
     assert client.get("/admin/audits/private-trace", headers=headers).status_code == 403
+
+
+def _published_evaluation(root, run_id="eval-2026-09-30"):
+    from evaluation.benchmark import stable_checksum
+    from evaluation.reporting import render_markdown
+
+    run_dir = root / run_id
+    (run_dir / "queries").mkdir(parents=True)
+    report = {
+        "run_id": run_id,
+        "benchmark_checksum": "a" * 64,
+        "corpus_checksum": "b" * 64,
+        "configuration_checksum": "c" * 64,
+        "variants": ["dense_only", "hybrid", "reranked", "agentic"],
+        "query_count": 1,
+        "metrics": {
+            "dense_only.recall@10": {"status": "completed", "value": 0.75, "reason": None},
+            "hybrid.ragas.faithfulness": {"status": "not_run", "value": None, "reason": "provider unavailable"},
+            "agentic.ragas.context_precision": {"status": "failed", "value": None, "reason": "provider failed"},
+        },
+        "latency": {"dense_only": {"count": 1, "median": 12.0}},
+        "failure_categories": {"retrieval_miss": 1},
+        "robustness": {"dense_only": {"status": "completed", "value": {"scenarios": {"noisy_query": {"mean_metric_deltas": {"recall@10": -0.1}}}}, "reason": None, "queries": {}}},
+        "limitations": ["optional metric fixture"],
+        "prompts": "must not be returned",
+        "model_output": "must not be returned",
+        "api_key": "must not be returned",
+        "hidden_trace": {"secret": True},
+    }
+    query = {"query_id": "q1", "variants": {"dense_only": {"diagnostics": [{"category": "retriever_miss", "evidence": "hidden"}], "robustness": {"status": "completed", "scenarios": {"noisy_query": {"metric_deltas": {"recall@10": -0.1}}}, "raw_output": "hidden"}}}}
+    report_bytes = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode()
+    query_bytes = (json.dumps(query, sort_keys=True, indent=2) + "\n").encode()
+    markdown_bytes = render_markdown(report).encode()
+    checksums = {
+        "report.json": hashlib.sha256(report_bytes).hexdigest(),
+        "report.md": hashlib.sha256(markdown_bytes).hexdigest(),
+        "queries": {"q1.json": hashlib.sha256(query_bytes).hexdigest()},
+    }
+    (run_dir / "report.json").write_bytes(report_bytes)
+    (run_dir / "report.md").write_bytes(markdown_bytes)
+    (run_dir / "queries" / "q1.json").write_bytes(query_bytes)
+    (run_dir / "checksums.json").write_text(json.dumps(checksums), encoding="utf-8")
+    manifest = {"latest_run_id": run_id, "runs": [{"run_id": run_id, "report_checksum": checksums["report.json"], "checksums_checksum": stable_checksum(checksums)}]}
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return run_dir
+
+
+def test_evaluations_require_admin_and_list_only_promoted_reports(client, tmp_path):
+    from backend.app.core.config import get_settings
+
+    root = tmp_path / "evaluation-reports"
+    run_dir = _published_evaluation(root)
+    (root / "partial-run").mkdir()
+    original_files = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    assert client.get("/admin/evaluations").status_code == 401
+    reader = sign_in(client, "reader", "reader-password-123")
+    assert client.get("/admin/evaluations", headers=reader).status_code == 403
+    assert client.get("/admin/evaluations/eval-2026-09-30", headers=reader).status_code == 403
+    admin = sign_in(client, "admin", "admin-password-123")
+    response = client.get("/admin/evaluations", headers=admin)
+    assert response.status_code == 200
+    assert [item["run_id"] for item in response.json()["items"]] == ["eval-2026-09-30"]
+    detail = client.get("/admin/evaluations/eval-2026-09-30", headers=admin)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["report_checksum"] == hashlib.sha256((run_dir / "report.json").read_bytes()).hexdigest()
+    assert body["benchmark_checksum"] == "a" * 64
+    assert "prompts" not in body and "model_output" not in body and "api_key" not in body and "hidden_trace" not in body
+    assert body["queries"][0]["variants"]["dense_only"]["diagnostics"] == [{"category": "retriever_miss"}]
+    assert "evidence" not in str(body) and "raw_output" not in str(body)
+    assert get_settings().EVALUATION_REPORTS_DIR == str(root)
+    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == original_files
+
+
+@pytest.mark.parametrize("run_id", ["../secret", "..", "a/b", "a\\b", ".hidden", "C:\\secret"])
+def test_evaluation_detail_rejects_unsafe_run_ids(client, run_id):
+    admin = sign_in(client, "admin", "admin-password-123")
+    response = client.get("/admin/evaluations/" + run_id, headers=admin)
+    assert response.status_code in {400, 404}
+    assert "C:\\" not in response.text
+
+
+def test_evaluation_detail_fails_closed_on_checksum_mismatch_and_missing_report(client, tmp_path):
+    root = tmp_path / "evaluation-reports"
+    run_dir = _published_evaluation(root)
+    admin = sign_in(client, "admin", "admin-password-123")
+    before = (run_dir / "report.json").read_bytes()
+    (run_dir / "report.json").write_text('{"run_id":"eval-2026-09-30","secret":"must-not-leak"}', encoding="utf-8")
+    corrupt = client.get("/admin/evaluations/eval-2026-09-30", headers=admin)
+    assert corrupt.status_code in {500, 503}
+    assert "secret" not in corrupt.text and str(tmp_path) not in corrupt.text
+    (run_dir / "report.json").write_bytes(before)
+    (run_dir / "report.json").write_bytes(b"{malformed report json")
+    malformed = client.get("/admin/evaluations/eval-2026-09-30", headers=admin)
+    assert malformed.status_code == 503
+    assert str(tmp_path) not in malformed.text and "malformed report json" not in malformed.text
+    (run_dir / "report.json").write_bytes(before)
+    missing = client.get("/admin/evaluations/missing-run", headers=admin)
+    assert missing.status_code == 404
+
+
+def test_evaluation_report_directory_symlink_cannot_escape_root(client, tmp_path):
+    root = tmp_path / "evaluation-reports"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    _published_evaluation(outside)
+    try:
+        (root / "linked-run").symlink_to(outside / "eval-2026-09-30", target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+    from evaluation.benchmark import stable_checksum
+    external_manifest = json.loads((outside / "manifest.json").read_text(encoding="utf-8"))
+    external_entry = external_manifest["runs"][0]
+    checksums = json.loads((outside / "eval-2026-09-30" / "checksums.json").read_text(encoding="utf-8"))
+    (root / "manifest.json").write_text(json.dumps({"latest_run_id": "linked-run", "runs": [{"run_id": "linked-run", "report_checksum": external_entry["report_checksum"], "checksums_checksum": stable_checksum(checksums)}]}), encoding="utf-8")
+    admin = sign_in(client, "admin", "admin-password-123")
+    response = client.get("/admin/evaluations/linked-run", headers=admin)
+    assert response.status_code in {404, 500, 503}
+    assert str(outside) not in response.text

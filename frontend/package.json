@@ -10,7 +10,8 @@
     "test:ui-stress": "node tests/ui-stress.mjs",
     "test:ui-preview": "node tests/ui-preview.mjs",
     "test:ui-accounts": "node tests/ui-accounts.mjs",
-    "test:ui-conversations": "node tests/ui-conversations.mjs"
+    "test:ui-conversations": "node tests/ui-conversations.mjs",
+    "test:ui-evaluation": "node tests/ui-evaluation.mjs"
   },
   "engines": {
     "node": ">=20.19.0"

@@ -354,3 +354,17 @@ aside.paper-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; display: f
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.evaluation-dashboard { display: grid; gap: 18px; }
+.evaluation-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; padding: 20px; }
+.evaluation-metadata > div { display: grid; gap: 5px; min-width: 0; }
+.evaluation-metadata span, .evaluation-value { color: var(--muted); font-size: 12px; }
+.evaluation-metadata strong { color: var(--ink); }
+.evaluation-metadata code, .evaluation-report-list code { overflow-wrap: anywhere; color: var(--ink); font-size: 11px; }
+.evaluation-section { padding: 20px; }
+.evaluation-section > h2 { margin: 0 0 14px; color: var(--ink); font-family: var(--font-display); font-size: 22px; }
+.evaluation-section td small { display: block; max-width: 260px; margin-top: 5px; color: var(--muted); line-height: 1.5; }
+.evaluation-value { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.evaluation-section .status-pill { display: inline-flex; }
+.evaluation-section .status-pill-not_run { background: #f4efdf; color: #7c672a; }
+.evaluation-section ul { padding-left: 20px; color: var(--muted); line-height: 1.7; }
+@media (max-width: 600px) { .evaluation-metadata { grid-template-columns: 1fr; } .evaluation-section { padding: 15px; } }

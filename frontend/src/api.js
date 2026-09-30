@@ -73,6 +73,8 @@ export function runResearch({ query, yearMin, yearMax, studyTypes, maxLoops }, i
 export const listAudits = (params = {}) => request("/admin/audits?" + new URLSearchParams(params));
 export const getAudit = (id) => request("/admin/audits/" + encodeURIComponent(id));
 export const getObservability = (days = 30) => request("/admin/observability?days=" + days);
+export const getEvaluations = () => request("/admin/evaluations");
+export const getEvaluation = (runId) => request("/admin/evaluations/" + encodeURIComponent(runId));
 export const listAccounts = (params = {}) => request("/admin/accounts?" + new URLSearchParams(params));
 export const createAccount = (payload) => request("/admin/accounts", { method: "POST", body: JSON.stringify(payload) });
 export const updateAccount = (id, payload) => request("/admin/accounts/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify(payload) });
