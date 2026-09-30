@@ -254,6 +254,36 @@ def test_evaluations_require_admin_and_list_only_promoted_reports(client, tmp_pa
     assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == original_files
 
 
+def test_committed_task13_reports_are_admin_readable_with_safe_typed_metrics(client, monkeypatch):
+    reports = __import__("pathlib").Path(__file__).resolve().parents[2] / "evaluation" / "reports"
+    from backend.app.core.config import get_settings
+    monkeypatch.setenv("EVALUATION_REPORTS_DIR", str(reports))
+    get_settings.cache_clear()
+    admin = sign_in(client, "admin", "admin-password-123")
+
+    listed = client.get("/admin/evaluations", headers=admin)
+    assert listed.status_code == 200
+    run_ids = {item["run_id"] for item in listed.json()["items"]}
+    expected_runs = {"eval-1e50313b8ba2-task13-final", "eval-1e50313b8ba2-task13-report-integration"}
+    assert expected_runs <= run_ids
+    for run_id in expected_runs:
+        detail = client.get(f"/admin/evaluations/{run_id}", headers=admin)
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["metrics"]["agentic.route_confusion"]["value"]["SIMPLE"]["MODERATE"] == 10
+        assert body["answer_status_distribution"] == {"INSUFFICIENT": 27, "LIMITED": 3, "SUPPORTED": 10}
+        assert body["robustness"]["agentic"]["value"]["scenarios"]["noisy_query"]
+
+
+def test_route_confusion_projection_rejects_unknown_labels_and_invalid_counts():
+    from backend.app.evaluation.service import _InvalidBundle, _metric_value
+
+    assert _metric_value("agentic.route_confusion", {"SIMPLE": {"MODERATE": 2}}) == {"SIMPLE": {"MODERATE": 2}}
+    for malformed in ({"UNKNOWN": {"SIMPLE": 1}}, {"SIMPLE": {"UNKNOWN": 1}}, {"SIMPLE": {"SIMPLE": -1}}, {"SIMPLE": {"SIMPLE": True}}):
+        with pytest.raises(_InvalidBundle):
+            _metric_value("agentic.route_confusion", malformed)
+
+
 @pytest.mark.parametrize("run_id", ["../secret", "..", "a/b", "a\\b", ".hidden", "C:\\secret"])
 def test_evaluation_detail_rejects_unsafe_run_ids(client, run_id):
     admin = sign_in(client, "admin", "admin-password-123")

@@ -35,12 +35,12 @@ async function scenario(role) {
             'agentic.context_precision': { status: 'failed', value: null, reason: 'Provider failed' },
           },
           latency: { dense_only: { count: 2, median: 12.5 } }, failure_categories: { retrieval_miss: 1 },
-          robustness: { dense_only: { status: 'completed', value: { scenarios: { noisy_query: { mean_metric_deltas: { 'recall@10': -0.1 } } } }, reason: null } },
+          robustness: { dense_only: { status: 'completed', value: { scenarios: { noisy_query: { query_context_coverage: -0.2, context_precision: -0.1, candidate_filter_compliance: -0.3 } } }, reason: null } },
           queries: [{
             query_id: 'q1',
             variants: { dense_only: {
               diagnostics: [{ category: 'retriever_miss' }],
-              robustness: { scenarios: { noisy_query: { metric_deltas: { 'recall@10': -0.1 } } } },
+              robustness: { scenarios: { noisy_query: { query_context_coverage: -0.2, context_precision: -0.1, candidate_filter_compliance: -0.3 } } },
             } },
           }],
         };
@@ -62,7 +62,10 @@ async function scenario(role) {
     await page.getByText('recall@10').first().waitFor();
     await page.getByText('Credentials are not configured').waitFor();
     await page.getByText('retrieval_miss').first().waitFor();
-    await page.getByText('-0.1').first().waitFor();
+    for (const delta of ['-0.2', '-0.1', '-0.3']) await page.getByText(delta).first().waitFor();
+    await page.getByText('query_context_coverage').first().waitFor();
+    await page.getByText('context_precision').first().waitFor();
+    await page.getByText('candidate_filter_compliance').first().waitFor();
     const ablation = page.locator('.evaluation-section').filter({ has: page.getByRole('heading', { name: 'Four-variant ablation' }) });
     assert.deepEqual(await ablation.locator('thead th').allTextContents(), ['Metric', 'dense_only', 'hybrid', 'reranked', 'agentic']);
     const missingVariantCell = ablation.locator('tbody tr').filter({ hasText: 'recall@10' }).locator('td').nth(2);

@@ -227,6 +227,11 @@ def run(query_file: Path, index_file: Path, top_k: int, answers_file: Path | Non
     return report
 
 
+def _normalized_pmid(value: Any) -> str | None:
+    match = re.fullmatch(r"\s*(?:PMID\s*:\s*)?(\d+)\s*", str(value or ""), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
 def evaluate_saved_variants(
     benchmark_path: str | Path,
     artifacts_dir: str | Path,
@@ -370,14 +375,19 @@ def evaluate_saved_variants(
                 ]
             elif isinstance(coverage_rows, list) and coverage_rows and isinstance(coverage_rows[-1], dict) and isinstance(coverage_rows[-1].get("coverage"), list):
                 coverage_rows = coverage_rows[-1]["coverage"]
-            if required_ids and isinstance(coverage_rows, list):
+            if required_ids and isinstance(coverage_rows, list) and coverage_rows:
                 covered_ids = {
                     str(item.get("subquestion_id")) for item in coverage_rows
                     if isinstance(item, dict) and item.get("status") == "COVERED"
                 }
                 coverage_value = len(set(required_ids) & covered_ids) / len(set(required_ids))
                 coverage_values.append(coverage_value)
-            answered_ids = answer.get("answered_subquestions") or answer.get("covered_subquestions") if isinstance(answer, dict) else None
+            if isinstance(answer, dict) and "answered_subquestions" in answer:
+                answered_ids = answer.get("answered_subquestions")
+            elif isinstance(answer, dict) and "covered_subquestions" in answer:
+                answered_ids = answer.get("covered_subquestions")
+            else:
+                answered_ids = None
             if required_ids and isinstance(answered_ids, list):
                 completeness_values.append(len(set(required_ids) & set(map(str, answered_ids))) / len(set(required_ids)))
             claim_attributions = answer.get("claim_attributions") if isinstance(answer, dict) else None
@@ -391,11 +401,18 @@ def evaluate_saved_variants(
                 supported_claims += sum(verdicts)
                 material_claims += len(verdicts)
             evidence_rows = artifact.evidence or []
-            candidate_text = " ".join(str(item.get("abstract") or "") for item in artifact.candidates if isinstance(item, dict))
-            spans = [str(span) for row in evidence_rows if isinstance(row, dict) for span in (row.get("supporting_text_spans") or []) if str(span).strip()]
-            if spans:
-                span_denominator += len(spans)
-                span_numerator += sum(span in candidate_text for span in spans)
+            candidate_abstracts = {
+                _normalized_pmid(item.get("pmid")): str(item.get("abstract") or "")
+                for item in artifact.candidates if isinstance(item, dict) and _normalized_pmid(item.get("pmid"))
+            }
+            span_checks = [
+                isinstance(span, str) and bool(span.strip()) and span in candidate_abstracts.get(_normalized_pmid(row.get("pmid")), "")
+                for row in evidence_rows if isinstance(row, dict)
+                for span in (row.get("supporting_text_spans") or [])
+            ]
+            if span_checks:
+                span_denominator += len(span_checks)
+                span_numerator += sum(span_checks)
             citations_for_query = answer.get("cited_pmids") if isinstance(answer, dict) else None
             citations = answer.get("cited_pmids") if isinstance(answer, dict) else None
             diagnostic_input = {
@@ -422,15 +439,19 @@ def evaluate_saved_variants(
                 query_details["filter_accuracy"] = {"status": "completed", "value": filter_value, "reason": None}
             else:
                 query_details["filter_accuracy"] = {"status": "not_run", "value": None, "reason": f"candidate metadata missing required constraints: {', '.join(sorted(missing_fields)) or 'no returned candidates'}"}
-            if required_ids and isinstance(coverage_rows, list):
+            if required_ids and isinstance(coverage_rows, list) and coverage_rows:
                 query_details["subquestion_coverage"] = {"status": "completed", "value": coverage_value, "reason": None}
+            elif required_ids:
+                query_details["subquestion_coverage"] = {"status": "not_run", "value": None, "reason": "saved coverage history contains no subquestion observations"}
             if required_ids and isinstance(answered_ids, list):
                 query_details["answer_completeness"] = {"status": "completed", "value": len(set(required_ids) & set(map(str, answered_ids))) / len(set(required_ids)), "reason": None}
             if citations_for_query is not None:
                 query_details["citation_precision"] = {"status": "completed", "value": citation_precision(citations_for_query, entry.relevant_pmids), "reason": None} if citations_for_query else {"status": "not_run", "value": None, "reason": "answer contains no citations"}
                 query_details["citation_validity"] = {"status": "completed", "value": citation_validity(citations_for_query, corpus_pmids), "reason": None} if citations_for_query and corpus_pmids else {"status": "not_run", "value": None, "reason": "citations or active-corpus PMID membership unavailable"}
-            if spans:
-                query_details["span_precision"] = {"status": "completed", "value": sum(span in candidate_text for span in spans) / len(spans), "reason": None}
+            if span_checks:
+                query_details["span_precision"] = {"status": "completed", "value": sum(span_checks) / len(span_checks), "reason": None}
+            elif artifact.evidence:
+                query_details["span_precision"] = {"status": "not_run", "value": None, "reason": "saved evidence contains no supporting spans"}
             if isinstance(plan, dict) and plan.get("route"):
                 query_details["route_accuracy"] = {"status": "completed", "value": float(plan["route"] == entry.expected_route), "reason": None}
             if effective_robustness_runner is not None:
@@ -474,7 +495,7 @@ def evaluate_saved_variants(
         route_rows = [item for item in loaded[variant].values() if item.research_plan and item.research_plan.get("route")]
         metric_results[f"{variant}.route_accuracy"] = {"status": "completed", "value": sum(item.research_plan["route"] == item.expected_route for item in route_rows) / len(route_rows), "reason": None} if route_rows else {"status": "not_run", "value": None, "reason": "no saved research plan contains a predicted route"}
         metric_results[f"{variant}.route_confusion"] = {"status": "completed", "value": route_confusion([item.expected_route for item in route_rows], [item.research_plan["route"] for item in route_rows]), "reason": None} if route_rows else {"status": "not_run", "value": None, "reason": "no saved research plan contains a predicted route"}
-        metric_results[f"{variant}.subquestion_coverage"] = {"status": "completed", "value": sum(coverage_values) / len(coverage_values), "reason": None} if coverage_values else {"status": "not_run", "value": None, "reason": "saved plan and coverage history do not contain required subquestion IDs and statuses"}
+        metric_results[f"{variant}.subquestion_coverage"] = {"status": "completed", "value": sum(coverage_values) / len(coverage_values), "reason": None} if coverage_values else {"status": "not_run", "value": None, "reason": "saved plan and coverage history do not contain observed subquestion IDs and statuses"}
         completeness_missing_reason = "retrieval-only variant has no answer payload" if variant != "agentic" else "answer payload lacks explicit answered subquestion IDs"
         metric_results[f"{variant}.answer_completeness"] = {"status": "completed", "value": sum(completeness_values) / len(completeness_values), "reason": None} if completeness_values else {"status": "not_run", "value": None, "reason": completeness_missing_reason}
         metric_results[f"{variant}.span_precision"] = {"status": "completed", "value": span_numerator / span_denominator, "reason": None} if span_denominator else {"status": "not_run", "value": None, "reason": "saved evidence contains no supporting spans to check against returned abstracts"}
@@ -586,7 +607,8 @@ def evaluate_saved_variants(
             "Optional provider metrics remain not_run when references or provider credentials are unavailable.",
         ],
     }
-    return ReportStore(reports_dir).publish(run_id, report, {f"{query_id}.json": payload for query_id, payload in per_query.items()})
+    publish_root = Path(reports_dir) / "diagnostic" if allow_subset and set(active) != set(variants) else Path(reports_dir)
+    return ReportStore(publish_root).publish(run_id, report, {f"{query_id}.json": payload for query_id, payload in per_query.items()})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -598,7 +620,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reports-dir", "--output-dir", dest="reports_dir", type=Path, default=Path("evaluation/reports"))
     parser.add_argument("--run-id", help="Immutable report ID; defaults to a checksum-derived ID")
     parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--allow-subset", action="store_true", help="Explicitly permit a report containing only the complete variants that are present; such reports are not suitable for four-variant promotion.")
+    parser.add_argument("--allow-subset", action="store_true", help="Write an explicitly requested subset run under diagnostic/; it is never promoted to the main report manifest.")
     parser.add_argument("--ragas-provider", help="Optional provider factory as module:callable; the callable returns an adapter with score(scorer, sample).")
     args = parser.parse_args(argv)
     if len(args.variants) != 4 or set(args.variants) != {"dense_only", "hybrid", "reranked", "agentic"}:

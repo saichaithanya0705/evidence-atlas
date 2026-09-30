@@ -32,3 +32,11 @@ The promoted report and per-query bundle also store answer-status distribution d
 - Report Markdown SHA-256: `1d774d1553a4c6f3eeeb59a1f30e61286a73b0180bcd5a5e8211bedb5ed5322b`.
 
 The `INSUFFICIENT` distribution is an evaluation observation, not a clinical outcome. Conservative abstention when evidence is conflicting or no supported claim survives validation follows the agent design. The three retrieval-only variants' `answer: null` values are expected by their contract. RAGAS faithfulness/relevancy stayed `not_run` without a configured provider; reference-dependent RAGAS metrics stayed `not_run` because the frozen benchmark has no reference answers.
+
+## Re-review fixes (2026-09-30)
+
+- TDD RED reproduced five regressions: both committed Task 13 bundles returned HTTP 503 through the admin list API; the route-confusion mapping was rejected; subset runs published into the promoted root; empty coverage was reported as completed zero and explicit empty answered-subquestions were dropped; a span found in a different PMID's abstract scored as supported.
+- Strict admin projection now accepts only SIMPLE/MODERATE/COMPLEX route labels and nonnegative integer counts, rejects malformed matrices, and exposes only validated aggregate answer-status counts. Both committed bundles pass admin list/detail API checks and retain robustness deltas.
+- Empty coverage is `not_run`; explicit `answered_subquestions: []` is a measured completeness of 0.0. Supporting spans are checked against the candidate abstract matching the evidence row PMID; unknown/mismatched PMIDs score unsupported.
+- `--allow-subset` publishes diagnostic runs beneath a separate `diagnostic/` report root, leaving the ordinary promoted manifest untouched. UI evaluation fixture now uses the typed robustness delta keys and asserts all values render.
+- Re-review runner/admin/reporting suites: 44 passed, 1 skipped. Full backend suite: 1,120 passed, 2 skipped, 9 warnings. UI evaluation passed; production build passed with the existing Node 20.18.0 / Vite 20.19+ version warning. Follow-up commit: see repository history.

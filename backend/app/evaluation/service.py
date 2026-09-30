@@ -28,6 +28,8 @@ _METRIC_SUFFIXES = {
     *(f"ragas.{name}" for name in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness")),
 }
 _ROBUSTNESS_METRICS = {"query_context_coverage", "context_precision", "candidate_filter_compliance"}
+_ROUTES = {"SIMPLE", "MODERATE", "COMPLEX"}
+_ANSWER_STATUSES = {"SUPPORTED", "LIMITED", "INSUFFICIENT", "FAILED"}
 
 
 class _StrictResponse(BaseModel):
@@ -46,6 +48,7 @@ class EvaluationSummary(_StrictResponse):
     latency: dict[str, dict[str, Any]]
     failure_categories: dict[str, int]
     robustness: dict[str, dict[str, Any]]
+    answer_status_distribution: dict[str, int]
     limitations: list[str]
 
 
@@ -122,6 +125,18 @@ def _metric_value(name: str, value: Any) -> Any:
         return value
     if not isinstance(value, Mapping):
         raise _InvalidBundle
+    if name.endswith(".route_confusion"):
+        matrix: dict[str, dict[str, int]] = {}
+        for expected, predictions in value.items():
+            if expected not in _ROUTES or not isinstance(predictions, Mapping):
+                raise _InvalidBundle
+            projected: dict[str, int] = {}
+            for predicted, count in predictions.items():
+                if predicted not in _ROUTES or isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    raise _InvalidBundle
+                projected[predicted] = count
+            matrix[expected] = projected
+        return matrix
     if name.endswith(".latency_ms") or name == "latency":
         return {key: value[key] for key in ("count", "min", "median", "mean", "max") if isinstance(value.get(key), (int, float)) and math.isfinite(value[key])}
     if name.endswith(".robustness") or name == "robustness":
@@ -212,6 +227,14 @@ def _project_report(report: Mapping[str, Any], report_checksum: str) -> dict[str
     if not isinstance(failures, Mapping):
         raise _InvalidBundle
     projected_failures = {name: count for name, count in failures.items() if name in _FAILURES and isinstance(count, int) and count >= 0}
+    raw_status_counts = report.get("answer_status_distribution", {})
+    if not isinstance(raw_status_counts, Mapping):
+        raise _InvalidBundle
+    answer_status_distribution: dict[str, int] = {}
+    for status, count in raw_status_counts.items():
+        if status not in _ANSWER_STATUSES or isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise _InvalidBundle
+        answer_status_distribution[status] = count
     robustness = report.get("robustness", {})
     if not isinstance(robustness, Mapping):
         raise _InvalidBundle
@@ -231,6 +254,7 @@ def _project_report(report: Mapping[str, Any], report_checksum: str) -> dict[str
         "latency": projected_latency,
         "failure_categories": projected_failures,
         "robustness": projected_robustness,
+        "answer_status_distribution": answer_status_distribution,
         "limitations": [item.strip()[:300] for item in limitations[:30]],
     }
 

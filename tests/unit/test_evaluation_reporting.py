@@ -97,6 +97,7 @@ def test_admin_report_projection_exposes_only_documented_metrics_and_fields():
     assert set(projected) == {
         "run_id", "report_checksum", "benchmark_checksum", "corpus_checksum", "configuration_checksum",
         "variants", "query_count", "metrics", "latency", "failure_categories", "robustness", "limitations",
+        "answer_status_distribution",
     }
     assert projected["metrics"] == {"dense_only.recall@5": {"status": "completed", "value": 0.5, "reason": None}}
     report["metrics"]["dense_only.prompt"] = {"status": "completed", "value": "private prompt", "reason": None}

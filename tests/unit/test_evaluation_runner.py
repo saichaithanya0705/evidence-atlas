@@ -70,8 +70,8 @@ def test_saved_variant_runner_default_path_persists_all_robustness_scenarios(tmp
         "--benchmark", str(benchmark), "--artifacts-dir", str(artifacts),
         "--reports-dir", str(reports), "--run-id", "robust-run", "--allow-subset",
     ])
-    report = json.loads((reports / "robust-run" / "report.json").read_text(encoding="utf-8"))
-    query = json.loads((reports / "robust-run" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "robust-run" / "report.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "robust-run" / "queries" / "q1.json").read_text(encoding="utf-8"))
     robustness = query["variants"]["dense_only"]["robustness"]
 
     assert set(robustness["scenarios"]) == set(SCENARIOS)
@@ -95,13 +95,13 @@ def test_runner_fails_closed_when_robustness_scorer_returns_empty_metrics(tmp_pa
         robustness_runner=lambda _entry, _artifact, _sample: {},
         allow_subset=True,
     )
-    report = json.loads((reports / "empty-deltas" / "report.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "empty-deltas" / "report.json").read_text(encoding="utf-8"))
     result = report["metrics"]["dense_only.robustness"]
     assert result["status"] == "failed"
     assert result["value"] is None
     assert result["reason"]
     summary = report["robustness"]["dense_only"]
-    query = json.loads((reports / "empty-deltas" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "empty-deltas" / "queries" / "q1.json").read_text(encoding="utf-8"))
     assert summary["status"] == result["status"]
     assert summary["reason"] == result["reason"]
     assert summary["queries"]["q1"] == query["variants"]["dense_only"]["robustness"]
@@ -113,6 +113,17 @@ def test_report_promotion_rejects_missing_requested_variants(tmp_path):
     benchmark, artifacts, reports, _entry, _artifact = _runner_fixture(tmp_path)
     with pytest.raises(ValueError, match="all four variants"):
         evaluate_saved_variants(benchmark, artifacts, reports, run_id="must-have-four")
+    assert not (reports / "manifest.json").exists()
+
+
+def test_subset_reports_are_written_to_diagnostic_area_not_promoted(tmp_path):
+    from evaluation.run_evaluation import evaluate_saved_variants
+
+    benchmark, artifacts, reports, _entry, _artifact = _runner_fixture(tmp_path)
+    evaluate_saved_variants(benchmark, artifacts, reports, run_id="diagnostic-dense", allow_subset=True)
+
+    assert (reports / "diagnostic" / "diagnostic-dense" / "report.json").is_file()
+    assert (reports / "diagnostic" / "manifest.json").is_file()
     assert not (reports / "manifest.json").exists()
 
 
@@ -143,8 +154,8 @@ def test_filter_accuracy_uses_candidate_metadata_and_compliance_flag(tmp_path, c
     artifact.metadata_filters.update(filter_changes)
     (artifacts / "dense_only" / "q1.json").write_text(artifact.model_dump_json(), encoding="utf-8")
     evaluate_saved_variants(benchmark, artifacts, reports, run_id="hostile-filter", allow_subset=True)
-    report = json.loads((reports / "hostile-filter" / "report.json").read_text(encoding="utf-8"))
-    query = json.loads((reports / "hostile-filter" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "hostile-filter" / "report.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "hostile-filter" / "queries" / "q1.json").read_text(encoding="utf-8"))
     assert report["metrics"]["dense_only.filter_accuracy"]["value"] == expected
     assert query["variants"]["dense_only"]["filter_accuracy"]["status"] == "completed"
 
@@ -158,8 +169,8 @@ def test_filter_accuracy_is_not_run_when_candidate_constraint_metadata_is_missin
     artifact.metadata_filters.update(year_constraints)
     (artifacts / "dense_only" / "q1.json").write_text(artifact.model_dump_json(), encoding="utf-8")
     evaluate_saved_variants(benchmark, artifacts, reports, run_id="missing-filter-metadata", allow_subset=True)
-    report = json.loads((reports / "missing-filter-metadata" / "report.json").read_text(encoding="utf-8"))
-    query = json.loads((reports / "missing-filter-metadata" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "missing-filter-metadata" / "report.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "missing-filter-metadata" / "queries" / "q1.json").read_text(encoding="utf-8"))
     assert report["metrics"]["dense_only.filter_accuracy"]["status"] == "not_run"
     assert query["variants"]["dense_only"]["filter_accuracy"]["status"] == "not_run"
     assert missing_field in query["variants"]["dense_only"]["filter_accuracy"]["reason"]
@@ -191,7 +202,7 @@ def test_ragas_injected_evaluator_scores_agentic_and_skips_retrieval_only(tmp_pa
 
     evaluator = Evaluator()
     evaluate_saved_variants(benchmark, artifacts, reports, run_id="ragas-injected", allow_subset=True, ragas_evaluator=evaluator)
-    report = json.loads((reports / "ragas-injected" / "report.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "ragas-injected" / "report.json").read_text(encoding="utf-8"))
     assert report["metrics"]["agentic.ragas.faithfulness"] == {"status": "completed", "value": 0.75, "reason": None}
     assert report["metrics"]["dense_only.ragas.faithfulness"]["status"] == "not_run"
     assert "reference" not in evaluator.samples[0]
@@ -200,7 +211,7 @@ def test_ragas_injected_evaluator_scores_agentic_and_skips_retrieval_only(tmp_pa
     assert report["metrics"]["agentic.subquestion_coverage"]["value"] == 1.0
     assert report["metrics"]["agentic.answer_completeness"]["status"] == "not_run"
     assert report["answer_status_distribution"] == {"SUPPORTED": 1}
-    query = json.loads((reports / "ragas-injected" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "ragas-injected" / "queries" / "q1.json").read_text(encoding="utf-8"))
     assert query["variants"]["agentic"]["answer_status"] == "SUPPORTED"
 
 
@@ -217,10 +228,53 @@ def test_ragas_missing_provider_and_references_get_prerequisite_specific_reasons
     agentic_dir.mkdir()
     (agentic_dir / "q1.json").write_text(agentic.model_dump_json(), encoding="utf-8")
     evaluate_saved_variants(benchmark, artifacts, reports, run_id="ragas-prerequisites", allow_subset=True)
-    report = json.loads((reports / "ragas-prerequisites" / "report.json").read_text(encoding="utf-8"))
+    report = json.loads((reports / "diagnostic" / "ragas-prerequisites" / "report.json").read_text(encoding="utf-8"))
     assert report["metrics"]["agentic.ragas.faithfulness"]["reason"] == "provider credentials or adapter unavailable"
     assert report["metrics"]["agentic.ragas.context_precision"]["reason"] == "missing required fields: reference"
     assert report["metrics"]["dense_only.ragas.faithfulness"]["reason"] == "retrieval-only variant has no answer-generation sample"
+
+
+def test_empty_coverage_is_not_run_but_explicit_empty_answered_list_is_zero(tmp_path):
+    from evaluation.run_evaluation import evaluate_saved_variants
+
+    benchmark, artifacts, reports, _entry, retrieval = _runner_fixture(tmp_path)
+    agentic = retrieval.model_copy(update={
+        "variant": "agentic", "research_plan": {"route": "SIMPLE", "subquestions": [{"id": "sq-1"}]},
+        "coverage": [], "corrections": [], "evidence": [],
+        "answer": {"synthesis": "No subquestions answered", "answered_subquestions": []}, "citations": [],
+    })
+    directory = artifacts / "agentic"
+    directory.mkdir()
+    (directory / "q1.json").write_text(agentic.model_dump_json(), encoding="utf-8")
+    evaluate_saved_variants(benchmark, artifacts, reports, run_id="empty-observations", allow_subset=True)
+    report = json.loads((reports / "diagnostic" / "empty-observations" / "report.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "empty-observations" / "queries" / "q1.json").read_text(encoding="utf-8"))
+
+    assert report["metrics"]["agentic.subquestion_coverage"]["status"] == "not_run"
+    assert query["variants"]["agentic"]["subquestion_coverage"]["status"] == "not_run"
+    assert report["metrics"]["agentic.answer_completeness"]["value"] == 0.0
+    assert query["variants"]["agentic"]["answer_completeness"]["value"] == 0.0
+
+
+def test_supporting_span_must_match_candidate_with_same_pmid(tmp_path):
+    from evaluation.run_evaluation import evaluate_saved_variants
+
+    benchmark, artifacts, reports, _entry, retrieval = _runner_fixture(tmp_path)
+    agentic = retrieval.model_copy(update={
+        "variant": "agentic", "research_plan": {"route": "SIMPLE", "subquestions": [{"id": "sq-1"}]},
+        "coverage": [{"iteration": 1, "coverage": [{"subquestion_id": "sq-1", "status": "COVERED"}]}],
+        "corrections": [], "evidence": [{"pmid": "999", "supporting_text_spans": ["Aspirin stroke evidence."]}],
+        "answer": {"synthesis": "A response", "cited_pmids": []}, "citations": [],
+    })
+    directory = artifacts / "agentic"
+    directory.mkdir()
+    (directory / "q1.json").write_text(agentic.model_dump_json(), encoding="utf-8")
+    evaluate_saved_variants(benchmark, artifacts, reports, run_id="mismatched-span-source", allow_subset=True)
+    report = json.loads((reports / "diagnostic" / "mismatched-span-source" / "report.json").read_text(encoding="utf-8"))
+    query = json.loads((reports / "diagnostic" / "mismatched-span-source" / "queries" / "q1.json").read_text(encoding="utf-8"))
+
+    assert report["metrics"]["agentic.span_precision"]["value"] == 0.0
+    assert query["variants"]["agentic"]["span_precision"]["value"] == 0.0
 
 
 def test_task11_project_command_accepts_complete_variant_list_and_output_dir(tmp_path, monkeypatch):
