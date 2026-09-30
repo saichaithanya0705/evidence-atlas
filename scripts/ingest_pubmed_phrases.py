@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import tarfile
 import tempfile
 import time
@@ -36,6 +37,21 @@ FIELDS = [
     "publication_date_raw", "year", "study_type", "publication_types",
     "mesh_terms", "keywords", "doi",
 ]
+
+
+def _get_ssl_context() -> ssl.SSLContext:
+    try:
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def _text(element: ET.Element | None) -> str:
@@ -107,9 +123,10 @@ def fetch_pubmed_xml(pmids: list[str], email: str = "", attempts: int = 4) -> by
             "User-Agent": "EvidenceAtlasCapstone/1.0",
         },
     )
+    context = _get_ssl_context()
     for attempt in range(1, attempts + 1):
         try:
-            with urlopen(request, timeout=90) as response:
+            with urlopen(request, timeout=90, context=context) as response:
                 return response.read()
         except Exception:
             if attempt == attempts:

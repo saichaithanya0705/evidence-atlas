@@ -1,7 +1,10 @@
 """Focused tests for the real PubMed ingestion bridge."""
 
 import json
+import ssl
 from urllib.error import HTTPError
+
+import pytest
 
 import scripts.ingest_pubmed_phrases as ingestion
 from scripts.ingest_pubmed_phrases import (
@@ -20,6 +23,32 @@ def test_select_pmids_never_exceeds_limit_when_intersection_is_large():
     selected = select_pmids(mapping, limit=2)
 
     assert selected == ["1", "2"]
+
+
+def test_pubmed_ssl_context_always_requires_certificate_verification():
+    context = ingestion._get_ssl_context()
+
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+
+def test_pubmed_certificate_failure_never_downgrades_to_unverified_tls(monkeypatch):
+    contexts = []
+
+    def certificate_failure(_request, *, timeout, context):
+        assert timeout == 90
+        contexts.append(context)
+        raise ssl.SSLCertVerificationError("certificate verify failed")
+
+    monkeypatch.setattr(ingestion, "urlopen", certificate_failure)
+    monkeypatch.setattr(ingestion.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(ssl.SSLCertVerificationError):
+        ingestion.fetch_pubmed_xml(["12345"], attempts=2)
+
+    assert len(contexts) == 2
+    assert contexts[0] is contexts[1]
+    assert all(context.verify_mode == ssl.CERT_REQUIRED for context in contexts)
 
 
 def test_parse_articles_preserves_raw_date_and_all_publication_types():
