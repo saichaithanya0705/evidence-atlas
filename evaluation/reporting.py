@@ -44,6 +44,14 @@ def _canonical_json(payload: Any) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
+def _display_metric_value(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
 def _validate_report(report: Mapping[str, Any], run_id: str) -> None:
     if report.get("run_id") != run_id:
         raise ValueError("report run_id does not match destination")
@@ -68,7 +76,7 @@ def _validate_report(report: Mapping[str, Any], run_id: str) -> None:
 def render_markdown(report: Mapping[str, Any]) -> str:
     lines = [f"# Evaluation report {report['run_id']}", "", f"- Run ID: `{report['run_id']}`", f"- Benchmark checksum: `{report['benchmark_checksum']}`", f"- Corpus checksum: `{report['corpus_checksum']}`", f"- Configuration checksum: `{report['configuration_checksum']}`", f"- Variants: `{', '.join(report['variants'])}`", f"- Query count: `{report['query_count']}`", "", "## Metrics", "", "| Metric | Status | Value | Reason |", "|---|---|---:|---|"]
     for name, metric in sorted(report["metrics"].items()):
-        value = "n/a" if metric.get("value") is None else str(metric["value"])
+        value = _display_metric_value(metric.get("value"))
         reason = str(metric.get("reason") or "").replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {name} | {metric['status']} | {value} | {reason} |")
     return "\n".join(lines) + "\n"
@@ -81,11 +89,12 @@ def validate_report_agreement(report: Mapping[str, Any], markdown: str) -> None:
         f"- Variants: `{', '.join(report['variants'])}`", f"- Query count: `{report['query_count']}`",
     ]
     for name, metric in sorted(report["metrics"].items()):
-        value = "n/a" if metric.get("value") is None else metric["value"]
+        value = _display_metric_value(metric.get("value"))
         reason = str(metric.get("reason") or "").replace("|", "\\|").replace("\n", " ")
         required.append(f"| {name} | {metric['status']} | {value} | {reason} |")
-    if any(fragment not in markdown for fragment in required):
-        raise ValueError("Markdown and JSON report disagree")
+    mismatch = next((fragment for fragment in required if fragment not in markdown), None)
+    if mismatch is not None:
+        raise ValueError(f"Markdown and JSON report disagree on {mismatch}")
 
 
 class ReportStore:

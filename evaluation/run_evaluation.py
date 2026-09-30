@@ -30,6 +30,7 @@ from evaluation.metrics import (
 )
 from evaluation.reporting import ReportStore
 from evaluation.diagnostics import diagnose_failures
+from evaluation.robustness import SCENARIOS, evaluate_robustness
 
 logger = logging.getLogger("evaluation")
 DEFAULT_QUERY_FILE = PROJECT_ROOT / "data" / "evaluation" / "queries.json"
@@ -186,11 +187,13 @@ def evaluate_saved_variants(
     *,
     run_id: str,
     top_k: int = 10,
+    robustness_runner: Callable[[Any, Any, dict[str, Any]], dict[str, float | int | None]] | None = None,
 ) -> dict[str, Any]:
     """Score available Task 7 artifacts and promote only a complete benchmark run."""
     from evaluation.variants import QueryEvaluationArtifact
 
     dataset = load_benchmark(benchmark_path)
+    corpus_checksum = file_checksum(dataset.corpus_path)
     base = Path(artifacts_dir)
     variants = ("dense_only", "hybrid", "reranked", "agentic")
     loaded: dict[str, dict[str, QueryEvaluationArtifact]] = {name: {} for name in variants}
@@ -200,7 +203,13 @@ def evaluate_saved_variants(
             if not path.is_file():
                 continue
             artifact = QueryEvaluationArtifact.model_validate_json(path.read_text(encoding="utf-8"))
-            if artifact.variant != variant or artifact.query_id != entry.id or artifact.query != entry.query:
+            if (
+                artifact.variant != variant
+                or artifact.query_id != entry.id
+                or artifact.query != entry.query
+                or artifact.benchmark_version != dataset.version
+                or artifact.corpus_identity != corpus_checksum
+            ):
                 raise ValueError(f"variant artifact identity mismatch: {path}")
             loaded[variant][entry.id] = artifact
         if len(loaded[variant]) not in (0, len(dataset.entries)):
@@ -213,6 +222,8 @@ def evaluate_saved_variants(
     per_query: dict[str, dict[str, Any]] = {entry.id: {"query_id": entry.id, "variants": {}} for entry in dataset.entries}
     failures: list[str] = []
     variant_latencies: dict[str, list[float]] = {name: [] for name in active}
+    robustness_results: dict[str, dict[str, Any]] = {name: {} for name in active}
+    robustness_errors: dict[str, list[str]] = {name: [] for name in active}
     corpus_pmids = set()
     try:
         from evaluation.adjudication import load_corpus_pmids
@@ -261,6 +272,24 @@ def evaluate_saved_variants(
                 "configuration_hash": artifact.configuration_hash,
                 "diagnostics": query_diagnostics,
             }
+            if robustness_runner is not None:
+                contexts = [
+                    str(candidate.get("abstract") or candidate.get("context") or candidate.get("title"))
+                    for candidate in artifact.candidates
+                    if isinstance(candidate, dict) and (candidate.get("abstract") or candidate.get("context") or candidate.get("title"))
+                ]
+                robustness_sample = {"query": entry.query, "contexts": contexts, "filters": artifact.metadata_filters}
+                try:
+                    result = evaluate_robustness(
+                        robustness_sample,
+                        lambda changed: robustness_runner(entry, artifact, changed),
+                    )
+                    robustness_results[variant][entry.id] = result
+                    query_details["robustness"] = result
+                except Exception as exc:
+                    reason = f"robustness evaluator failed ({type(exc).__name__})"
+                    robustness_errors[variant].append(reason)
+                    query_details["robustness"] = {"status": "failed", "value": None, "reason": reason}
             if citations is not None:
                 query_details["citation_metrics"] = {
                     "citation_validity": citation_validity(citations, corpus_pmids) if corpus_pmids else None,
@@ -281,7 +310,29 @@ def evaluate_saved_variants(
         metric_results[f"{variant}.citation_validity"] = {"status": "not_run", "value": None, "reason": "no complete, validated citation labels are available for every query"}
         for metric in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness"):
             metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": "reference answer or configured RAGAS provider is unavailable"}
-        metric_results[f"{variant}.robustness"] = {"status": "not_run", "value": None, "reason": "robustness evaluation requires rerunning retrieval on perturbed inputs"}
+        if robustness_runner is None:
+            metric_results[f"{variant}.robustness"] = {"status": "not_run", "value": None, "reason": "a retrieval and metric callback for perturbed inputs was not supplied"}
+        elif robustness_errors[variant]:
+            metric_results[f"{variant}.robustness"] = {"status": "failed", "value": None, "reason": robustness_errors[variant][0]}
+        else:
+            scenario_deltas: dict[str, dict[str, list[float]]] = {scenario: {} for scenario in SCENARIOS}
+            for query_result in robustness_results[variant].values():
+                for scenario, scenario_result in query_result["scenarios"].items():
+                    for metric, delta in scenario_result["metric_deltas"].items():
+                        scenario_deltas[scenario].setdefault(metric, []).append(float(delta))
+            summary = {
+                "scenario_count": len(SCENARIOS),
+                "query_count": len(robustness_results[variant]),
+                "scenarios": {
+                    scenario: {
+                        "mean_metric_deltas": {
+                            metric: sum(values) / len(values) for metric, values in sorted(metrics.items()) if values
+                        }
+                    }
+                    for scenario, metrics in scenario_deltas.items()
+                },
+            }
+            metric_results[f"{variant}.robustness"] = {"status": "completed", "value": summary, "reason": None}
 
     for variant in active:
         cited = [str(pmid) for artifact in loaded[variant].values() if artifact.answer for pmid in (artifact.answer.get("cited_pmids") or [])]
@@ -302,13 +353,23 @@ def evaluate_saved_variants(
     report = {
         "run_id": run_id,
         "benchmark_checksum": file_checksum(benchmark_path),
-        "corpus_checksum": file_checksum(dataset.corpus_path),
+        "corpus_checksum": corpus_checksum,
         "configuration_checksum": stable_checksum({variant: sorted(artifact.configuration_hash for artifact in loaded[variant].values()) for variant in active}),
         "variants": active,
         "query_count": len(dataset.entries),
         "metrics": metric_results,
         "latency": {variant: latency_summary(values) for variant, values in variant_latencies.items()},
         "failure_categories": failure_category_counts(failures),
+        "robustness": {
+            variant: (
+                {"status": "failed", "reason": robustness_errors[variant], "queries": robustness_results[variant]}
+                if robustness_errors[variant]
+                else {"status": "completed", "queries": robustness_results[variant]}
+                if robustness_runner is not None
+                else {"status": "not_run", "reason": "a retrieval and metric callback for perturbed inputs was not supplied"}
+            )
+            for variant in active
+        },
         "limitations": ["Metrics reflect saved evaluation artifacts; optional provider and perturbation reruns are reported as not_run when inputs are absent."],
     }
     return ReportStore(reports_dir).publish(run_id, report, {f"{query_id}.json": payload for query_id, payload in per_query.items()})

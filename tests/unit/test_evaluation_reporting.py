@@ -65,3 +65,11 @@ def test_metric_records_require_status_and_reason_for_noncompleted_results(tmp_p
     invalid = _report(metrics={"faithfulness": {"status": "not_run", "value": None, "reason": None}})
     with pytest.raises(ValueError, match="reason"):
         ReportStore(tmp_path).publish("run-1", invalid, {"q1.json": {"query_id": "q1"}})
+
+
+def test_markdown_metric_values_remain_agreeing_after_json_round_trip():
+    from evaluation.reporting import render_markdown, validate_report_agreement
+
+    report = _report(metrics={"latency": {"status": "completed", "value": {"count": 1, "min": 10.0, "median": 12.0, "mean": 12.0, "max": 14.0}, "reason": None}})
+    markdown = render_markdown(report)
+    validate_report_agreement(json.loads(json.dumps(report, sort_keys=True)), markdown)

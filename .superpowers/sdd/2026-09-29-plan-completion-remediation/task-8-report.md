@@ -54,3 +54,13 @@ The runner records aggregate diagnostics alongside per-query diagnostic artifact
 Feature commit: `975b80f` (`feat: add comprehensive research evaluation`).
 
 Concerns: the optional RAGAS import smoke remains blocked by the upstream `langchain-community` import path described above. All deterministic evaluation and backend tests pass.
+
+## Review fixes (based on `2c96d15`)
+
+Added strict binding checks before scoring: every saved variant must match the loaded benchmark version and the active corpus file checksum in its `benchmark_version` and `corpus_identity`. Regressions cover both mismatch types failing before manifest promotion and a matching artifact succeeding.
+
+Connected `evaluate_saved_variants` to the robustness helper through an explicit `robustness_runner` callback that must actually rerun/score each changed sample. For each variant and query, the report and query artifact now retain all seven scenario records, including perturbation provenance and per-metric deltas. Aggregate robustness metric values summarize scenario count, query count, and mean deltas. Without the callback, the runner stores `not_run` and explains the missing prerequisite; callback errors are recorded as `failed` with a bounded type-only reason.
+
+The new runner regression tests first failed: both stale-identity fixtures reached report generation instead of being rejected, and the runner did not accept or persist a robustness callback. They pass after the changes. The matching-artifact path also exposed a JSON/Markdown comparison bug for compound metric values after sorted JSON serialization; a regression now verifies consistent canonical display across that round-trip.
+
+Post-review verification: focused Task 8 and runner tests `20 passed`; full backend suite `1090 passed, 1 skipped, 9 warnings`. The warnings remain the FastAPI lifecycle deprecations and local Qdrant advisories noted above. The RAGAS import smoke limitation is unchanged.
