@@ -416,13 +416,16 @@ def evaluate_saved_variants(
         "latency": {variant: latency_summary(values) for variant, values in variant_latencies.items()},
         "failure_categories": failure_category_counts(failures),
         "robustness": {
-            variant: (
-                {"status": "failed", "reason": robustness_errors[variant], "queries": robustness_results[variant]}
-                if robustness_errors[variant]
-                else {"status": "completed", "queries": robustness_results[variant]}
-                if robustness_runner is not None
-                else {"status": "not_run", "reason": "a retrieval and metric callback for perturbed inputs was not supplied"}
-            )
+            variant: {
+                "status": metric_results[f"{variant}.robustness"]["status"],
+                "value": metric_results[f"{variant}.robustness"].get("value"),
+                "reason": metric_results[f"{variant}.robustness"].get("reason"),
+                "queries": {
+                    entry.id: per_query[entry.id]["variants"][variant]["robustness"]
+                    for entry in dataset.entries
+                    if "robustness" in per_query[entry.id]["variants"][variant]
+                },
+            }
             for variant in active
         },
         "limitations": [

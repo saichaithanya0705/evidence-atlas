@@ -74,3 +74,9 @@ Robustness evaluation now fails closed if the baseline or any scenario has no nu
 TDD evidence for this review: the no-callback runner regression initially failed because no per-query robustness section was written, and the empty-metrics callback incorrectly reported `completed`. After wiring the default evaluator and rejecting empty deltas, the default path persisted all seven scenarios with nonempty deltas and the empty-metrics case reported `failed`. The filter-pressure fixture asserts a computed negative filter-compliance delta.
 
 Verification after this review: focused Task 8 and runner tests `21 passed`; full backend suite `1091 passed, 1 skipped, 9 warnings`.
+
+## Review fix (top-level robustness summary)
+
+The top-level `report.robustness[variant]` summary now derives its status, value, and reason from the same metric record used by `report.metrics[variant.robustness]`. It includes each query's exact robustness payload from the per-query artifact, so scenario provenance and metric deltas agree across the summary and query detail. Failed callback results expose the same failure reason at both levels; completed results no longer coexist with a contradictory `not_run` summary.
+
+TDD evidence: the CLI/default-evaluator regression first failed because top-level robustness was `not_run` while the aggregate metric was `completed`. Added assertions compare the status, summary values, and query payload; the focused Task 8 suite then passed (`21 passed`). Full backend suite passed (`1091 passed, 1 skipped, 9 warnings`).

@@ -80,6 +80,10 @@ def test_saved_variant_runner_default_path_persists_all_robustness_scenarios(tmp
     assert robustness["scenarios"]["filter_pressure"]["metric_deltas"]["candidate_filter_compliance"] < 0
     assert report["metrics"]["dense_only.robustness"]["status"] == "completed"
     assert report["metrics"]["dense_only.robustness"]["value"]["scenario_count"] == len(SCENARIOS)
+    summary = report["robustness"]["dense_only"]
+    assert summary["status"] == report["metrics"]["dense_only.robustness"]["status"]
+    assert summary["queries"]["q1"] == robustness
+    assert "not_run" not in json.dumps(summary)
 
 
 def test_runner_fails_closed_when_robustness_scorer_returns_empty_metrics(tmp_path):
@@ -95,3 +99,8 @@ def test_runner_fails_closed_when_robustness_scorer_returns_empty_metrics(tmp_pa
     assert result["status"] == "failed"
     assert result["value"] is None
     assert result["reason"]
+    summary = report["robustness"]["dense_only"]
+    query = json.loads((reports / "empty-deltas" / "queries" / "q1.json").read_text(encoding="utf-8"))
+    assert summary["status"] == result["status"]
+    assert summary["reason"] == result["reason"]
+    assert summary["queries"]["q1"] == query["variants"]["dense_only"]["robustness"]
