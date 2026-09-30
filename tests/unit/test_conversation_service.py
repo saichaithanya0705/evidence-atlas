@@ -129,6 +129,7 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert restored.cited_pmids == ["12345"]
     assert restored.evidence_table[0].key_findings == "Result"
     assert restored.retrieved_papers[0].abstract == "Safe abstract"
+    assert restored.consensus_level == "consensus"
     restored_json = restored.model_dump(mode="json")
     assert "rrf_score" not in restored_json["retrieved_papers"][0]
     assert "admin_only" not in restored_json["evidence_table"][0]

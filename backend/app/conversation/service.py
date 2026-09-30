@@ -45,13 +45,15 @@ def _value(payload: Any, name: str, default=None):
     return payload.get(name, default) if isinstance(payload, dict) else getattr(payload, name, default)
 
 
-def public_research_projection(payload: Any) -> dict[str, Any]:
+def public_research_projection(payload: Any, *, include_conversation_fields: bool = False) -> dict[str, Any]:
     """Keep evidence and safe paper metadata while dropping diagnostics and scores."""
     query_plan = _value(payload, "query_plan")
     research_plan = _value(payload, "research_plan")
     coverage_statuses = _value(payload, "coverage_statuses", {}) or {}
     source = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else dict(payload)
     allowed = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps"}
+    if include_conversation_fields:
+        allowed.add("consensus_level")
     result = {key: source[key] for key in allowed if key in source}
     result["evidence_table"] = []
     for row in source.get("evidence_table", []):
@@ -161,7 +163,7 @@ class ConversationService:
             if item["status"] == "completed" and item.get("public_response_json"):
                 try:
                     saved = json.loads(item["public_response_json"])
-                    saved = public_research_projection(saved)
+                    saved = public_research_projection(saved, include_conversation_fields=True)
                     public_fields = (
                         "cited_pmids", "evidence_table", "retrieved_papers", "evidence_gaps", "consensus_level", "interpretation",
                     )
