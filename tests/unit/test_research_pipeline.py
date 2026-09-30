@@ -563,6 +563,10 @@ def test_research_semantic_release_rejection_adds_gap_and_audit_counts_it():
     assert "No retrieved claim passed the citation and semantic verification gates." in response.evidence_gaps
     assert release_event["status"] == "INSUFFICIENT"
     assert release_event["gap_count"] == len(response.evidence_gaps)
+    repair_event = next(payload for name, payload in events if name == "claim_repair")
+    assert repair_event["attempt_count"] == 1
+    assert repair_event["pruned_claims"] >= 1
+    assert service.get_trace("semantic-rejection-gap")["synthesis_metadata"]["repair"] == repair_event
 
 
 def test_failed_gap_reviewer_uses_deterministic_correction_and_maps_limited():

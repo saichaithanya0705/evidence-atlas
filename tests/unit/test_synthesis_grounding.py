@@ -5,6 +5,7 @@ import pytest
 from backend.app.evidence.extraction import EvidenceExtractor
 from backend.app.models.request_response import EvidenceRecord, RetrievalCandidate
 from backend.app.query.models import PICOModel, QueryPlan
+from backend.app.workflow.repair import TargetedClaimRepairer
 from backend.app.workflow.synthesis import ClaimToSpanValidator, EvidenceSynthesizer, _claims
 
 
@@ -221,3 +222,64 @@ def test_nim_rejects_unknown_span_and_falls_back_to_source():
     assert result.mode == "deterministic_spans"
     assert result.audit.valid
     assert "unknown PMID or source span" in result.fallback_reason
+
+
+def test_targeted_repair_preserves_supported_claim_and_replaces_only_failed_claim():
+    from backend.app.models.request_response import ClaimVerification
+
+    first_span = "Drug A reduced kidney disease progression among adults with diabetes."
+    second_span = "Drug B improved survival among adults with cancer."
+    original = (
+        "Evidence summary:\n"
+        f"{first_span[:-1]} [PMID: 12345].\n"
+        "Drug B improved survival in every patient [PMID: 54321].\n"
+        "Evidence gaps are listed separately in the response."
+    )
+    records = [
+        _record(first_span),
+        _record(second_span).model_copy(update={"pmid": "54321"}),
+    ]
+    audit = ClaimToSpanValidator().validate(original, records)
+    result = TargetedClaimRepairer().repair(
+        original,
+        records,
+        audit,
+        [
+            ClaimVerification(
+                claim_index=0, supported=True, supporting_pmids=["12345"], rationale="supported"
+            ),
+            ClaimVerification(
+                claim_index=1, supported=False, supporting_pmids=[], rationale="overstated"
+            ),
+        ],
+    )
+
+    assert f"{first_span[:-1]} [PMID: 12345]." in result.text
+    assert f"{second_span[:-1]} [PMID: 54321]." in result.text
+    assert "in every patient" not in result.text
+    assert result.text.startswith("Evidence summary:\n")
+    assert result.text.endswith("Evidence gaps are listed separately in the response.")
+    assert (result.preserved_claims, result.repaired_claims, result.pruned_claims) == (1, 1, 0)
+    assert result.attempt_count == 1
+
+
+def test_targeted_repair_never_introduces_a_new_pmid_and_prunes_without_exact_span():
+    from backend.app.models.request_response import ClaimVerification
+    from backend.app.workflow.synthesis import extract_cited_pmids
+
+    original = "Drug A cured every patient [PMID: 12345]."
+    records = [_record("Drug A reduced kidney disease progression.")]
+    result = TargetedClaimRepairer().repair(
+        original,
+        records,
+        ClaimToSpanValidator().validate(original, records),
+        [ClaimVerification(
+            claim_index=0, supported=False, supporting_pmids=["99999"], rationale="unsupported"
+        )],
+    )
+
+    assert result.text == ""
+    assert result.repaired_claims == 0
+    assert result.pruned_claims == 1
+    assert result.attempt_count == 1
+    assert extract_cited_pmids(result.text) == []

@@ -20,6 +20,7 @@ _EVENT_FIELDS = {
     "correct": {"status", "duration_ms", "iteration"},
     "correction_stopped": {"reason", "iteration"},
     "claim_verified": {"claim_count", "supported_count"},
+    "claim_repair": {"preserved_claims", "repaired_claims", "pruned_claims", "attempt_count"},
     "semantic_verification": {"supported_count", "unsupported_count"},
     "answer_released": {"status", "claim_count", "gap_count"},
     "evidence": {"status", "duration_ms", "evidence_count", "iteration"},
@@ -250,7 +251,7 @@ def _safe_event(event):
         "stop_reason": _STOP_REASONS, "reason": _STOP_REASONS,
     }
     boolean_fields = {"accepted", "rewrite_applied"}
-    integer_fields = {"iteration", "candidate_count", "missing_count", "conflict_count", "claim_count", "supported_count", "unsupported_count", "gap_count", "evidence_count"}
+    integer_fields = {"iteration", "candidate_count", "missing_count", "conflict_count", "claim_count", "supported_count", "unsupported_count", "gap_count", "evidence_count", "preserved_claims", "repaired_claims", "pruned_claims", "attempt_count"}
     for key in allowed:
         item = source.get(key)
         if key in enum_fields and isinstance(item, str) and item in enum_fields[key]:

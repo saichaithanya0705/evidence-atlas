@@ -78,6 +78,7 @@ class _WorkflowState:
     evidence_records: List[Any] = field(default_factory=list)
     analysis: Dict[str, Any] = field(default_factory=dict)
     synthesis: Any = None
+    synthesis_repair_metadata: Optional[Dict[str, int]] = None
     response: Optional[ResearchResponse] = None
     technical_failure: bool = False
     trace_payload: Dict[str, Any] = field(default_factory=dict)
@@ -866,6 +867,16 @@ class ResearchService:
                 )),
                 insufficient=insufficient,
             )
+            repair_metadata = getattr(workflow.synthesis, "repair_metadata", None)
+            if isinstance(repair_metadata, dict):
+                bounded_repair_metadata = {
+                    field: min(100000, max(0, value))
+                    for field in ("preserved_claims", "repaired_claims", "pruned_claims", "attempt_count")
+                    if type(value := repair_metadata.get(field)) is int
+                }
+                if workflow.event_sink:
+                    workflow.event_sink("claim_repair", bounded_repair_metadata)
+                workflow.synthesis_repair_metadata = bounded_repair_metadata
             return {"workflow": workflow}
 
         def validate_node(data: _GraphInput) -> Dict[str, _WorkflowState]:
@@ -1003,6 +1014,7 @@ class ResearchService:
                     "fallback_reason": synthesis.fallback_reason,
                     "insufficient_evidence": insufficient,
                     "timings_ms": synthesis.timings_ms,
+                    **({"repair": workflow.synthesis_repair_metadata} if workflow.synthesis_repair_metadata is not None else {}),
                 },
                 "citation_audit": audit_dict,
             }

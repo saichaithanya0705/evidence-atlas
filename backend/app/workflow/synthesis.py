@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from time import perf_counter
 
-from backend.app.models.request_response import EvidenceRecord
+from backend.app.models.request_response import ClaimVerification, EvidenceRecord
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
 from backend.app.core.nim_client import create_nim_client
 
@@ -212,6 +212,7 @@ class SynthesisResult:
     fallback_reason: Optional[str]
     audit: CitationAudit
     timings_ms: Optional[Dict[str, float]] = None
+    repair_metadata: Optional[Dict[str, int]] = None
 
 
 class EvidenceSynthesizer:
@@ -414,6 +415,78 @@ class EvidenceSynthesizer:
     def _all_supported(verdicts: Sequence[Any], expected: int) -> bool:
         return len(verdicts) == expected and all(item.supported for item in verdicts)
 
+    def _repair_and_revalidate(
+        self,
+        text: str,
+        records: Sequence[EvidenceRecord],
+        audit: CitationAudit,
+        verdicts: Sequence[Any],
+        *,
+        fallback_reason: str,
+        started: float,
+        generation_ms: float,
+    ) -> SynthesisResult:
+        from backend.app.workflow.repair import TargetedClaimRepairer
+
+        repairer = TargetedClaimRepairer(self.validator)
+        repair = repairer.repair(text, records, audit, verdicts)
+        metadata = repair.metadata()
+        repaired_audit = self.validator.validate(repair.text, records)
+        repaired_claims = _claims(repair.text)
+        if repair.text and repaired_claims and repaired_audit.valid:
+            try:
+                repaired_verdicts = self.semantic_verifier.verify(repair.text, records)
+            except Exception:
+                repaired_verdicts = []
+            if self._all_supported(repaired_verdicts, len(repaired_claims)):
+                return SynthesisResult(
+                    text=repair.text,
+                    mode="deterministic_spans",
+                    fallback_reason=fallback_reason,
+                    audit=repaired_audit,
+                    timings_ms={
+                        "generation": generation_ms,
+                        "validation_and_fallback": round(
+                            (perf_counter() - started) * 1000 - generation_ms, 2
+                        ),
+                    },
+                    repair_metadata=metadata,
+                )
+            pruned_text, pruned_after_revalidation = repairer.prune_unsupported(
+                repair.text, repaired_verdicts
+            )
+            metadata["pruned_claims"] += pruned_after_revalidation
+            pruned_audit = self.validator.validate(pruned_text, records)
+            if pruned_text and _claims(pruned_text) and pruned_audit.valid:
+                return SynthesisResult(
+                    text=pruned_text,
+                    mode="deterministic_spans",
+                    fallback_reason=fallback_reason,
+                    audit=pruned_audit,
+                    timings_ms={
+                        "generation": generation_ms,
+                        "validation_and_fallback": round(
+                            (perf_counter() - started) * 1000 - generation_ms, 2
+                        ),
+                    },
+                    repair_metadata=metadata,
+                )
+
+        abstention = "The available retrieved evidence is insufficient to provide a validated research summary."
+        return SynthesisResult(
+            text=abstention,
+            mode="deterministic_spans",
+            fallback_reason=fallback_reason,
+            audit=self.validator.validate(abstention, []),
+            timings_ms={
+                "generation": generation_ms,
+                "validation_and_fallback": round(
+                    (perf_counter() - started) * 1000 - generation_ms, 2
+                ),
+            },
+            repair_metadata=metadata,
+        )
+
     def synthesize(
         self,
         query: str,
@@ -446,21 +519,15 @@ class EvidenceSynthesizer:
                     if self._all_supported(verdicts, len(_claims(text))):
                         return SynthesisResult(text=text, mode="nvidia_nim", fallback_reason=None, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
                     fallback_reason = "Semantic verification rejected or could not verify one or more claims"
-                    repair_records = self._verified_records(text, records, verdicts)
-                    repaired_text = self.deterministic_text(query, repair_records, gaps, insufficient or not repair_records)
-                    repaired_audit = self.validator.validate(repaired_text, repair_records)
-                    if repair_records and repaired_audit.valid:
-                        repaired_verdicts = self.semantic_verifier.verify(repaired_text, repair_records)
-                        if self._all_supported(repaired_verdicts, len(_claims(repaired_text))):
-                            return SynthesisResult(text=repaired_text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=repaired_audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
-                        pruned_records = self._verified_records(repaired_text, repair_records, repaired_verdicts)
-                        text = self.deterministic_text(query, pruned_records, gaps, insufficient or not pruned_records)
-                        audit = self.validator.validate(text, pruned_records)
-                        if audit.valid:
-                            return SynthesisResult(text=text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
-                    text = "The available retrieved evidence is insufficient to provide a validated research summary."
-                    audit = self.validator.validate(text, [])
-                    return SynthesisResult(text=text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
+                    return self._repair_and_revalidate(
+                        text,
+                        records,
+                        audit,
+                        verdicts,
+                        fallback_reason=fallback_reason,
+                        started=started,
+                        generation_ms=generation_ms,
+                    )
                 if self._is_exact_span_text(text, records):
                     return SynthesisResult(text=text, mode="nvidia_nim", fallback_reason=None, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
                 fallback_reason = "Semantic verifier is not configured for newly generated prose"
@@ -469,6 +536,31 @@ class EvidenceSynthesizer:
                     "NVIDIA NIM response failed citation/support validation: "
                     f"hallucinated_pmids={audit.hallucinated_pmids}; unsupported_claims={len(audit.unsupported_claims)}"
                 )
+                if self._semantic_available():
+                    known_pmids = {record.pmid for record in records}
+                    synthetic_verdicts = []
+                    for index, claim in enumerate(_claims(text)):
+                        cited_pmids = list(dict.fromkeys(_PMID_PATTERN.findall(claim)))
+                        supported = (
+                            claim in audit.claim_support_map
+                            and bool(cited_pmids)
+                            and all(pmid in known_pmids for pmid in cited_pmids)
+                        )
+                        synthetic_verdicts.append(ClaimVerification(
+                            claim_index=index,
+                            supported=supported,
+                            supporting_pmids=cited_pmids if supported else [],
+                            rationale="Deterministic citation gate result before targeted repair.",
+                        ))
+                    return self._repair_and_revalidate(
+                        text,
+                        records,
+                        audit,
+                        synthetic_verdicts,
+                        fallback_reason=fallback_reason,
+                        started=started,
+                        generation_ms=generation_ms,
+                    )
         except Exception as exc:
             generation_ms = round((perf_counter() - started) * 1000, 2)
             fallback_reason = f"NVIDIA NIM synthesis unavailable or malformed: {exc}"
@@ -489,22 +581,13 @@ class EvidenceSynthesizer:
             except Exception:
                 verdicts = []
             if not self._all_supported(verdicts, len(_claims(text))):
-                repair_records = self._verified_records(text, records, verdicts)
-                if repair_records:
-                    repaired_text = self.deterministic_text(query, repair_records, gaps, insufficient)
-                    repaired_audit = self.validator.validate(repaired_text, repair_records)
-                    try:
-                        repaired_verdicts = self.semantic_verifier.verify(repaired_text, repair_records) if repaired_audit.valid else []
-                    except Exception:
-                        repaired_verdicts = []
-                    if repaired_audit.valid and self._all_supported(repaired_verdicts, len(_claims(repaired_text))):
-                        return SynthesisResult(text=repaired_text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=repaired_audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
-                    pruned_records = self._verified_records(repaired_text, repair_records, repaired_verdicts)
-                    if pruned_records:
-                        text = self.deterministic_text(query, pruned_records, gaps, insufficient)
-                        audit = self.validator.validate(text, pruned_records)
-                        if audit.valid:
-                            return SynthesisResult(text=text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})
-                text = "The available retrieved evidence is insufficient to provide a validated research summary."
-                audit = self.validator.validate(text, [])
+                return self._repair_and_revalidate(
+                    text,
+                    records,
+                    audit,
+                    verdicts,
+                    fallback_reason=fallback_reason or "Semantic verification rejected deterministic evidence claims",
+                    started=started,
+                    generation_ms=generation_ms,
+                )
         return SynthesisResult(text=text, mode="deterministic_spans", fallback_reason=fallback_reason, audit=audit, timings_ms={"generation": generation_ms, "validation_and_fallback": round((perf_counter() - started) * 1000 - generation_ms, 2)})

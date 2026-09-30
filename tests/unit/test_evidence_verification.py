@@ -223,7 +223,9 @@ def test_one_time_repair_releases_only_semantically_verified_spans():
     }, {
         "claim_index": 1, "supported": True, "supporting_pmids": ["54321"], "rationale": "This is the exact source finding."
     }]}), json.dumps({"verdicts": [{
-        "claim_index": 0, "supported": True, "supporting_pmids": ["54321"], "rationale": "The source states this finding."
+        "claim_index": 0, "supported": True, "supporting_pmids": ["12345"], "rationale": "The exact source states this finding."
+    }, {
+        "claim_index": 1, "supported": True, "supporting_pmids": ["54321"], "rationale": "The original supported claim is preserved."
     }]})])
 
     result = EvidenceSynthesizer(
@@ -233,9 +235,14 @@ def test_one_time_repair_releases_only_semantically_verified_spans():
 
     assert result.mode == "deterministic_spans"
     assert "in every patient" not in result.text
+    assert "Drug B improved survival" in result.text
     assert span.rstrip(".") in result.text
     assert result.audit.valid
     assert len(semantic_provider.calls) == 2
+    assert result.repair_metadata == {
+        "preserved_claims": 1, "repaired_claims": 1,
+        "pruned_claims": 0, "attempt_count": 1,
+    }
 
 
 def test_failed_repair_prunes_claim_and_abstains_when_none_remain():
@@ -273,6 +280,35 @@ def test_zero_validated_claims_produce_insufficient_grade():
     assert result.audit.valid
     assert result.audit.cited_pmids == []
     assert "insufficient" in result.text.casefold()
+
+
+def test_citation_invalid_output_repairs_claim_locally_before_semantic_revalidation():
+    valid_span = "Drug A reduced kidney disease progression among adults with diabetes."
+    generated = (
+        f"{valid_span[:-1]} [PMID: 12345].\n"
+        "Drug A cured every patient [PMID: 99999]."
+    )
+    semantic_provider = Provider(json.dumps({"verdicts": [{
+        "claim_index": 0,
+        "supported": True,
+        "supporting_pmids": ["12345"],
+        "rationale": "The exact source states this finding.",
+    }]}))
+
+    result = EvidenceSynthesizer(
+        client=lambda *_args: generated,
+        semantic_verifier=SemanticClaimVerifier(client=semantic_provider),
+    ).synthesize("kidney outcomes", [_record(span=valid_span)], [])
+
+    assert valid_span[:-1] in result.text
+    assert "99999" not in result.text
+    assert "cured every patient" not in result.text
+    assert result.audit.valid
+    assert result.repair_metadata == {
+        "preserved_claims": 1, "repaired_claims": 0,
+        "pruned_claims": 1, "attempt_count": 1,
+    }
+    assert len(semantic_provider.calls) == 1
 
 
 def test_missing_semantic_client_allows_only_exact_span_fallback():
