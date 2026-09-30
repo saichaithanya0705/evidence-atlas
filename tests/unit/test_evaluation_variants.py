@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from evaluation import variants
 from evaluation.models import BenchmarkEntry
 from evaluation.variants import (
     AgenticVariant,
@@ -151,7 +152,7 @@ def test_agentic_artifact_records_production_trace_plan_coverage_and_answer():
 
 
 def test_artifacts_share_strict_schema_and_configuration_hash_tracks_material_settings():
-    base = {"schema_version": "1.0", "benchmark_version": "2.0", "corpus_identity": "sha256:corpus", "query_id": "q", "variant": "dense_only", "configuration_hash": "a" * 64, "metadata_filters": {}, "top_k": 5, "candidate_pmids": [], "candidates": [], "latency_ms": 1.0}
+    base = {"schema_version": "1.0", "benchmark_version": "2.0", "corpus_identity": "sha256:corpus", "query_id": "q", "query": "query text", "expected_route": "SIMPLE", "variant": "dense_only", "configuration_hash": "a" * 64, "metadata_filters": {}, "top_k": 5, "candidate_pmids": [], "candidates": [], "latency_ms": 1.0}
     assert QueryEvaluationArtifact.model_validate(base).query_id == "q"
     with pytest.raises(ValueError):
         QueryEvaluationArtifact.model_validate({**base, "unexpected": True})
@@ -161,6 +162,185 @@ def test_artifacts_share_strict_schema_and_configuration_hash_tracks_material_se
     changed_config = DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=6, benchmark_version="2.0", corpus_identity="sha256:corpus")
     assert configuration_hash(same_config._configuration()) == configuration_hash(same_config._configuration())
     assert configuration_hash(same_config._configuration()) != configuration_hash(changed_config._configuration())
+
+
+@pytest.mark.parametrize(
+    "setting,changed_value",
+    [
+        ("RRF_K", 61),
+        ("DENSE_TOP_K", 31),
+        ("SPARSE_TOP_K", 31),
+        ("QDRANT_STORAGE_PATH", "different-vector-store"),
+        ("MEDCPT_QUERY_ENCODER", "different-query-model"),
+        ("BM25_INDEX_PATH", "different-bm25-index"),
+        ("MESH_GRAPH_PATH", "different-graph"),
+    ],
+)
+def test_reranked_hash_tracks_every_material_hybrid_pool_setting(setting, changed_value):
+    values = {
+        "RRF_K": 60, "DENSE_TOP_K": 30, "SPARSE_TOP_K": 30,
+        "MEDCPT_QUERY_ENCODER": "query-model", "BM25_INDEX_PATH": "bm25-index",
+        "MESH_GRAPH_PATH": "mesh-graph", "RERANKER_TOP_N": 10,
+        "MEDCPT_CROSS_ENCODER": "cross-model",
+    }
+    before = RerankedVariant(planner=make_plan, retriever=Retriever(), reranker=Reranker(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**values))
+    values[setting] = changed_value
+    after = RerankedVariant(planner=make_plan, retriever=Retriever(), reranker=Reranker(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**values))
+
+    assert configuration_hash(before._configuration()) != configuration_hash(after._configuration())
+
+
+@pytest.mark.parametrize(
+    "setting,changed_value",
+    [
+        ("NVIDIA_MODEL_NAME", "different-llm"),
+        ("LLM_MODE", "openai"),
+        ("LLM_TEMPERATURE", 0.7),
+        ("LLM_MAX_TOKENS", 4096),
+        ("LLM_SYNTHESIS_MAX_TOKENS", 512),
+        ("MAX_CORRECTIVE_LOOPS", 3),
+        ("DENSE_TOP_K", 31),
+        ("SPARSE_TOP_K", 31),
+        ("QDRANT_STORAGE_PATH", "different-vector-store"),
+        ("NVIDIA_BASE_URL", "https://different-host/v1"),
+        ("RRF_K", 61),
+        ("BM25_INDEX_PATH", "different-bm25-index"),
+        ("MESH_GRAPH_PATH", "different-graph"),
+    ],
+)
+def test_agentic_hash_tracks_material_workflow_and_retrieval_settings(setting, changed_value):
+    values = {
+        "NVIDIA_MODEL_NAME": "llm-model", "NVIDIA_BASE_URL": "https://user:password@host/v1?api_key=secret-one",
+        "LLM_MODE": "mock", "LLM_TEMPERATURE": 0.1,
+        "LLM_MAX_TOKENS": 2048, "LLM_SYNTHESIS_MAX_TOKENS": 300,
+        "MAX_CORRECTIVE_LOOPS": 2, "DENSE_TOP_K": 30, "SPARSE_TOP_K": 30,
+        "RRF_K": 60, "BM25_INDEX_PATH": "bm25-index", "MESH_GRAPH_PATH": "mesh-graph",
+        "MAX_SUBQUERIES": 4, "RERANKER_TOP_N": 10,
+        "MEDCPT_QUERY_ENCODER": "query-model", "MEDCPT_CROSS_ENCODER": "cross-model",
+    }
+    before = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**values))
+    values[setting] = changed_value
+    after = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**values))
+
+    assert configuration_hash(before._configuration()) != configuration_hash(after._configuration())
+
+
+def test_configuration_hash_ignores_nonmaterial_settings_and_secret_values():
+    material = {"NVIDIA_MODEL_NAME": "model-a", "NVIDIA_BASE_URL": "https://user:password@host/v1?api_key=secret-one", "LLM_MODE": "mock", "RRF_K": 60, "NVIDIA_API_KEY": "secret-one", "LOG_LEVEL": "INFO"}
+    before = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**material))
+    material["NVIDIA_API_KEY"] = "secret-two"
+    material["NVIDIA_BASE_URL"] = "https://another-user:another-password@host/v1?api_key=secret-two"
+    material["LOG_LEVEL"] = "DEBUG"
+    after = AgenticVariant(service=object(), top_k=5, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=SimpleNamespace(**material))
+
+    assert configuration_hash(before._configuration()) == configuration_hash(after._configuration())
+    serialized = json.dumps(before._configuration())
+    assert "secret-" not in serialized
+    assert "password" not in serialized
+    assert "another-user" not in serialized
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda original: original.model_copy(update={"study_type": "Observational"}),
+        lambda original: original.model_copy(update={"query": "Updated query with same ID"}),
+        lambda original: original.model_copy(update={"expected_route": "COMPLEX"}),
+    ],
+    ids=["filters", "query-text", "expected-route"],
+)
+def test_resume_reruns_when_query_or_metadata_filters_change(tmp_path, change):
+    variant = DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus")
+    output = tmp_path / "resume-identity"
+    original = entry()
+    assert run_evaluation([original], {"dense_only": variant}, output_dir=output)["written"] == 1
+
+    changed = change(original)
+    result = run_evaluation([changed], {"dense_only": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 1, "skipped": 0}
+    saved = json.loads((output / "dense_only" / f"{original.id}.json").read_text(encoding="utf-8"))
+    assert saved["query"] == changed.query
+    assert saved["expected_route"] == changed.expected_route
+    assert saved["metadata_filters"] == {"study_types": [changed.study_type]}
+
+
+def test_resume_reruns_when_stored_top_k_or_configuration_is_stale(tmp_path):
+    variant = DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus")
+    output = tmp_path / "resume-top-k"
+    current = entry()
+    run_evaluation([current], {"dense_only": variant}, output_dir=output)
+    target = output / "dense_only" / f"{current.id}.json"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    payload["top_k"] = 4
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_evaluation([current], {"dense_only": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 1, "skipped": 0}
+    assert json.loads(target.read_text(encoding="utf-8"))["top_k"] == 3
+
+
+def test_resume_reruns_for_changed_reranked_pool_configuration(tmp_path):
+    settings = SimpleNamespace(
+        DENSE_TOP_K=10, SPARSE_TOP_K=10, RRF_K=60, MAX_SUBQUERIES=4,
+        RERANKER_TOP_N=5, MEDCPT_QUERY_ENCODER="query-model",
+        MEDCPT_CROSS_ENCODER="cross-model", BM25_INDEX_PATH="bm25-a",
+        MESH_GRAPH_PATH="mesh-a",
+    )
+    variant = RerankedVariant(planner=make_plan, retriever=Retriever(), reranker=Reranker(), top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    output = tmp_path / "reranked-config"
+    run_evaluation([entry()], {"reranked": variant}, output_dir=output)
+    settings.RRF_K = 61
+
+    result = run_evaluation([entry()], {"reranked": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 1, "skipped": 0}
+
+
+def test_resume_reruns_for_changed_agentic_llm_configuration(tmp_path):
+    response = SimpleNamespace(
+        request_id="request-1", model_dump=lambda **kwargs: {"synthesis": "Answer"},
+        research_plan={"subquestions": []}, coverage_statuses={"sq-1": "covered"},
+        retrieved_papers=[], evidence_table=[], cited_pmids=[],
+    )
+    service = SimpleNamespace(
+        research=lambda query, user_filters, max_loops, route_floor: response,
+        get_trace=lambda request_id: {"research_plan": {"subquestions": []}, "coverage_history": [{"covered": True}], "corrective_queries": []},
+    )
+    settings = SimpleNamespace(LLM_MODE="mock", NVIDIA_MODEL_NAME="model-a", LLM_TEMPERATURE=0.1)
+    variant = AgenticVariant(service=service, top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    output = tmp_path / "agentic-config"
+    run_evaluation([entry()], {"agentic": variant}, output_dir=output)
+    settings.LLM_TEMPERATURE = 0.7
+
+    result = run_evaluation([entry()], {"agentic": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 1, "skipped": 0}
+
+
+def test_resume_skips_when_only_secret_or_nonmaterial_setting_changes(tmp_path):
+    response = SimpleNamespace(
+        request_id="request-1", model_dump=lambda **kwargs: {"synthesis": "Answer"},
+        research_plan={"subquestions": []}, coverage_statuses={"sq-1": "covered"},
+        retrieved_papers=[], evidence_table=[], cited_pmids=[],
+    )
+    calls = []
+    service = SimpleNamespace(
+        research=lambda query, user_filters, max_loops, route_floor: calls.append(query) or response,
+        get_trace=lambda request_id: {"research_plan": {"subquestions": []}, "coverage_history": [{"covered": True}], "corrective_queries": []},
+    )
+    settings = SimpleNamespace(LLM_MODE="mock", NVIDIA_MODEL_NAME="model-a", LLM_TEMPERATURE=0.1, NVIDIA_API_KEY="secret-one", LOG_LEVEL="INFO")
+    variant = AgenticVariant(service=service, top_k=3, benchmark_version="2.0", corpus_identity="sha256:corpus", settings=settings)
+    output = tmp_path / "agentic-nonmaterial"
+    run_evaluation([entry()], {"agentic": variant}, output_dir=output)
+    settings.NVIDIA_API_KEY = "secret-two"
+    settings.LOG_LEVEL = "DEBUG"
+
+    result = run_evaluation([entry()], {"agentic": variant}, output_dir=output, resume=True)
+
+    assert result == {"written": 0, "skipped": 1}
+    assert calls == [entry().query]
 
 
 def test_atomic_write_and_resume_preserve_valid_artifacts_and_repair_malformed(tmp_path):
@@ -183,3 +363,22 @@ def test_atomic_write_and_resume_preserve_valid_artifacts_and_repair_malformed(t
     write_artifact_atomic(atomic_path, {"query_id": "q", "ok": True})
     assert json.loads(atomic_path.read_text(encoding="utf-8")) == {"query_id": "q", "ok": True}
     assert sorted(item.name for item in atomic_path.parent.iterdir()) == ["artifact.json"]
+
+
+def test_atomic_write_retries_transient_replace_permission_error(tmp_path, monkeypatch):
+    real_replace = variants.os.replace
+    attempts = []
+
+    def replace_with_transient_denial(source, target):
+        attempts.append((source, target))
+        if len(attempts) == 1:
+            raise PermissionError("transient file scanner lock")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(variants.os, "replace", replace_with_transient_denial)
+    path = tmp_path / "atomic-retry.json"
+
+    write_artifact_atomic(path, {"written": True})
+
+    assert len(attempts) == 2
+    assert json.loads(path.read_text(encoding="utf-8")) == {"written": True}

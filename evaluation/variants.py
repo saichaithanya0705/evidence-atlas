@@ -8,13 +8,51 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from evaluation.benchmark import file_checksum, load_benchmark, stable_checksum
 from evaluation.models import BenchmarkEntry
 from backend.app.models.request_response import RetrievalCandidate
+
+
+_DENSE_SETTINGS = (
+    "DENSE_TOP_K",
+    "MEDCPT_QUERY_ENCODER",
+    "MEDCPT_ALLOW_MOCK",
+    "DEVICE",
+    "EMBEDDING_DIMENSION",
+    "QDRANT_COLLECTION_NAME",
+    "QDRANT_STORAGE_PATH",
+    "INDEX_MANIFEST_PATH",
+)
+_HYBRID_SETTINGS = _DENSE_SETTINGS + (
+    "SPARSE_TOP_K",
+    "RRF_K",
+    "MAX_SUBQUERIES",
+    "RERANKER_TOP_N",
+    "BM25_INDEX_PATH",
+    "MESH_GRAPH_PATH",
+    "MESH_DICT_PATH",
+)
+_RERANKED_SETTINGS = _HYBRID_SETTINGS + (
+    "MEDCPT_CROSS_ENCODER",
+    "MEDCPT_ARTICLE_ENCODER",
+    "EMBEDDING_BATCH_SIZE",
+)
+_AGENTIC_SETTINGS = _RERANKED_SETTINGS + (
+    "MAX_CORRECTIVE_LOOPS",
+    "NVIDIA_MODEL_NAME",
+    "NVIDIA_BASE_URL",
+    "LLM_MODE",
+    "LLM_TEMPERATURE",
+    "LLM_MAX_TOKENS",
+    "LLM_SYNTHESIS_MAX_TOKENS",
+    "LLM_TIMEOUT_SECONDS",
+    "agent_output_max_tokens",
+)
 
 
 class QueryEvaluationArtifact(BaseModel):
@@ -24,6 +62,8 @@ class QueryEvaluationArtifact(BaseModel):
     benchmark_version: str
     corpus_identity: str
     query_id: str
+    query: str
+    expected_route: Literal["SIMPLE", "MODERATE", "COMPLEX"]
     variant: str = Field(pattern=r"^(dense_only|hybrid|reranked|agentic)$")
     configuration_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     metadata_filters: dict[str, Any]
@@ -66,6 +106,30 @@ def configuration_hash(configuration: Mapping[str, Any]) -> str:
     return stable_checksum(dict(configuration))
 
 
+def _material_settings(settings: Any, names: Sequence[str]) -> dict[str, Any]:
+    """Select approved behavior settings, excluding credentials by construction."""
+    result: dict[str, Any] = {}
+    if settings is None:
+        return result
+    for name in names:
+        if not hasattr(settings, name):
+            continue
+        value = getattr(settings, name)
+        if name == "NVIDIA_BASE_URL":
+            parsed = urlsplit(str(value))
+            hostname = parsed.hostname or ""
+            try:
+                port = parsed.port
+            except ValueError:
+                port = None
+            netloc = f"[{hostname}]" if ":" in hostname else hostname
+            if port is not None:
+                netloc = f"{netloc}:{port}"
+            value = urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+        result[name] = value
+    return result
+
+
 class _RetrievalVariant:
     name = ""
     channels: tuple[str, ...] = ()
@@ -84,10 +148,10 @@ class _RetrievalVariant:
 
     def _configuration(self) -> dict[str, Any]:
         names = {
-            "dense_only": ("DENSE_TOP_K", "MEDCPT_QUERY_ENCODER"),
-            "hybrid": ("DENSE_TOP_K", "SPARSE_TOP_K", "RRF_K", "MAX_SUBQUERIES", "RERANKER_TOP_N", "MEDCPT_QUERY_ENCODER", "BM25_INDEX_PATH", "MESH_GRAPH_PATH"),
-            "reranked": ("DENSE_TOP_K", "SPARSE_TOP_K", "RRF_K", "MAX_SUBQUERIES", "RERANKER_TOP_N", "MEDCPT_QUERY_ENCODER", "MEDCPT_CROSS_ENCODER", "BM25_INDEX_PATH", "MESH_GRAPH_PATH"),
-            "agentic": ("MAX_CORRECTIVE_LOOPS", "MAX_SUBQUERIES", "RERANKER_TOP_N", "RRF_K", "MEDCPT_QUERY_ENCODER", "MEDCPT_CROSS_ENCODER"),
+            "dense_only": _DENSE_SETTINGS,
+            "hybrid": _HYBRID_SETTINGS,
+            "reranked": _RERANKED_SETTINGS,
+            "agentic": _AGENTIC_SETTINGS,
         }.get(self.name, ())
         return {
             "variant": self.name,
@@ -95,7 +159,7 @@ class _RetrievalVariant:
             "top_k": self.top_k,
             "benchmark_version": self.benchmark_version,
             "corpus_identity": self.corpus_identity,
-            "settings": {name: getattr(self.settings, name) for name in names if self.settings is not None and hasattr(self.settings, name)},
+            "settings": _material_settings(self.settings, names),
         }
 
     def _artifact(self, entry, plan, candidates, started, *, pool=None, **extra):
@@ -103,6 +167,8 @@ class _RetrievalVariant:
             benchmark_version=self.benchmark_version,
             corpus_identity=self.corpus_identity,
             query_id=entry.id,
+            query=entry.query,
+            expected_route=entry.expected_route,
             variant=self.name,
             configuration_hash=configuration_hash(self._configuration()),
             metadata_filters={"study_types": [entry.study_type]},
@@ -150,12 +216,6 @@ class RerankedVariant(HybridVariant):
     def _configuration(self):
         config = super()._configuration()
         config["variant"] = self.name
-        config["settings"] = {
-            name: getattr(self.settings, name)
-            for name in ("RERANKER_TOP_N", "MEDCPT_CROSS_ENCODER")
-            if self.settings is not None and hasattr(self.settings, name)
-        }
-        config["reranker"] = getattr(self.settings, "MEDCPT_CROSS_ENCODER", "production")
         return config
 
     def run(self, entry: BenchmarkEntry) -> QueryEvaluationArtifact:
@@ -184,11 +244,8 @@ class AgenticVariant(_RetrievalVariant):
         return {
             "variant": self.name,
             "top_k": self.top_k,
-            "settings": {
-                name: getattr(self.settings, name)
-                for name in ("MAX_CORRECTIVE_LOOPS", "MAX_SUBQUERIES", "RERANKER_TOP_N", "RRF_K", "MEDCPT_QUERY_ENCODER", "MEDCPT_CROSS_ENCODER")
-                if self.settings is not None and hasattr(self.settings, name)
-            },
+            "channels": self.channels,
+            "settings": _material_settings(self.settings, _AGENTIC_SETTINGS),
             "benchmark_version": self.benchmark_version,
             "corpus_identity": self.corpus_identity,
         }
@@ -206,7 +263,7 @@ class AgenticVariant(_RetrievalVariant):
         plan = trace.get("query_plan", {})
         return QueryEvaluationArtifact(
             benchmark_version=self.benchmark_version, corpus_identity=self.corpus_identity,
-            query_id=entry.id, variant=self.name,
+            query_id=entry.id, query=entry.query, expected_route=entry.expected_route, variant=self.name,
             configuration_hash=configuration_hash(self._configuration()),
             metadata_filters={"study_types": [entry.study_type]}, top_k=self.top_k,
             candidate_pmids=[str(item.pmid) for item in candidates],
@@ -232,7 +289,14 @@ def write_artifact_atomic(path: str | Path, artifact: Mapping[str, Any] | QueryE
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, target)
+        for attempt in range(6):
+            try:
+                os.replace(temporary, target)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.01 * (2**attempt))
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -252,8 +316,12 @@ def run_evaluation(entries: Sequence[BenchmarkEntry], variants: Mapping[str, Eva
                     if (
                         existing.query_id == entry.id
                         and existing.variant == name
+                        and existing.query == entry.query
+                        and existing.expected_route == entry.expected_route
                         and existing.benchmark_version == getattr(variant, "benchmark_version", None)
                         and existing.corpus_identity == getattr(variant, "corpus_identity", None)
+                        and existing.metadata_filters == {"study_types": [entry.study_type]}
+                        and existing.top_k == getattr(variant, "top_k", None)
                         and existing.configuration_hash == expected_hash
                     ):
                         result["skipped"] += 1
