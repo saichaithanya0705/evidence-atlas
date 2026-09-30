@@ -23,6 +23,26 @@ from backend.app.workflow.service import ResearchService
 from backend.app.workflow.synthesis import EvidenceSynthesizer, SynthesisResult
 
 
+def test_benchmark_entry_uses_bounded_production_research_with_expected_route_and_hard_filter():
+    service = object.__new__(ResearchService)
+    response = SimpleNamespace(request_id="request-1")
+    captured = {}
+    service.research = lambda query, **kwargs: captured.update(query=query, **kwargs) or response
+    service.get_trace = lambda request_id: {"request_id": request_id}
+    entry = SimpleNamespace(query="benchmark query", study_type="Randomized Controlled Trial", expected_route="COMPLEX")
+
+    result, trace = service.research_benchmark_entry(entry, max_loops=1)
+
+    assert result is response
+    assert trace == {"request_id": "request-1"}
+    assert captured == {
+        "query": "benchmark query",
+        "user_filters": {"study_types": ["Randomized Controlled Trial"]},
+        "max_loops": 1,
+        "route_floor": "COMPLEX",
+    }
+
+
 def make_plan(**kwargs):
     values = {
         "original_query": "Empagliflozin in type 2 diabetes and chronic kidney disease",

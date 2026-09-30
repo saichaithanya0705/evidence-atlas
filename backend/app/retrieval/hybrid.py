@@ -324,6 +324,25 @@ class HybridRetriever:
         Every channel is hard-filtered before RRF and candidates retain per-channel
         ranks and scores for the UI/audit trail.
         """
+        return self.search_channels(
+            plan,
+            channels=("dense_original", "dense_canonical", "bm25", "mesh_graph"),
+            top_k=top_k,
+        )
+
+    def search_channels(
+        self, plan: QueryPlan, *, channels: Sequence[str], top_k: int = 10
+    ) -> List[RetrievalCandidate]:
+        """Run selected production retrieval channels with shared filtering and fusion.
+
+        ``dense_original`` embeds only the preserved user query. Selection is
+        useful for controlled benchmark ablations without duplicating retrieval.
+        """
+        supported = {"dense_original", "dense_canonical", "bm25", "mesh_graph"}
+        selected = tuple(dict.fromkeys(channels))
+        unknown = set(selected) - supported
+        if unknown:
+            raise ValueError(f"unsupported retrieval channels: {', '.join(sorted(unknown))}")
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
         filters = self._filter_values(plan)
@@ -342,17 +361,35 @@ class HybridRetriever:
             canonical_vector = getattr(plan.embeddings, "canonical_query_embedding", None)
         else:
             orig_vector = canonical_vector = None
-        if orig_vector is None or canonical_vector is None:
+        if "dense_original" not in selected:
+            orig_vector = None
+        if "dense_canonical" not in selected:
+            canonical_vector = None
+        if ("dense_original" in selected and orig_vector is None) or (
+            "dense_canonical" in selected and canonical_vector is None
+        ):
             try:
                 encoder = self._get_query_encoder()
-                matrix = encoder.encode_queries([original, canonical])
-                orig_vector, canonical_vector = matrix[0], matrix[1]
+                queries = []
+                if "dense_original" in selected and orig_vector is None:
+                    queries.append(original)
+                if "dense_canonical" in selected and canonical_vector is None:
+                    queries.append(canonical)
+                matrix = encoder.encode_queries(queries)
+                index = 0
+                if "dense_original" in selected and orig_vector is None:
+                    orig_vector = matrix[index]
+                    index += 1
+                if "dense_canonical" in selected and canonical_vector is None:
+                    canonical_vector = matrix[index]
             except Exception as exc:
                 trace["dense_error"] = str(exc)
                 logger.warning("MedCPT query encoding failed; lexical retrieval remains available: %s", exc)
 
-        if orig_vector is not None and canonical_vector is not None:
+        if any(vector is not None for vector in (orig_vector, canonical_vector)):
             for channel, vector in (("dense_original", orig_vector), ("dense_canonical", canonical_vector)):
+                if channel not in selected or vector is None:
+                    continue
                 try:
                     rows = self._result_rows(self._dense_search(np.asarray(vector), dense_k, filters))
                     accepted: List[str] = []
@@ -380,7 +417,7 @@ class HybridRetriever:
             trace["channels"]["dense_original"] = {"returned": 0, "accepted": 0, "error": trace.get("dense_error", "no query embedding")}
             trace["channels"]["dense_canonical"] = {"returned": 0, "accepted": 0, "error": trace.get("dense_error", "no query embedding")}
 
-        bm25 = self._get_bm25()
+        bm25 = self._get_bm25() if "bm25" in selected else None
         queries = [original]
         if canonical.casefold() != original.casefold():
             queries.append(canonical)
@@ -413,7 +450,7 @@ class HybridRetriever:
             trace["channels"]["bm25"] = {"returned": 0, "accepted": 0, "error": "BM25 index unavailable"}
 
         route = str(getattr(plan, "route", "SIMPLE")).upper()
-        graph = self._get_graph() if route in {"MODERATE", "COMPLEX"} else None
+        graph = self._get_graph() if "mesh_graph" in selected and route in {"MODERATE", "COMPLEX"} else None
         if graph is not None and list(getattr(plan, "mesh_terms", []) or []):
             graph_scores: Dict[str, float] = {}
             try:

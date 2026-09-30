@@ -1131,6 +1131,20 @@ class ResearchService:
                 self._traces[request_id] = completed.trace_payload
         return completed.response
 
+    def research_benchmark_entry(self, entry: Any, *, max_loops: Optional[int] = None):
+        """Run a frozen benchmark entry through the bounded production workflow."""
+        response = self.research(
+            entry.query,
+            user_filters={"study_types": [entry.study_type]},
+            max_loops=(
+                int(getattr(self.settings, "MAX_CORRECTIVE_LOOPS", 2))
+                if max_loops is None
+                else int(max_loops)
+            ),
+            route_floor=entry.expected_route,
+        )
+        return response, self.get_trace(response.request_id) or {}
+
     def answer_from_evidence(
         self,
         query: str,
