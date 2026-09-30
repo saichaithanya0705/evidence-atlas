@@ -29,8 +29,9 @@ class RagasEvaluator:
     when evaluation is requested, keeping the core evaluator optional.
     """
 
-    def __init__(self, provider: Any = None):
+    def __init__(self, provider: Any = None, unavailable_reason: str | None = None):
         self.provider = provider
+        self.unavailable_reason = unavailable_reason or "provider credentials or adapter unavailable"
         self._scorers: dict[str, Any] | None = None
 
     def _load_scorers(self) -> dict[str, Any]:
@@ -63,7 +64,7 @@ class RagasEvaluator:
                 results[name] = {"status": "not_run", "value": None, "reason": f"missing required fields: {', '.join(missing)}"}
                 continue
             if self.provider is None:
-                results[name] = {"status": "not_run", "value": None, "reason": "provider credentials or adapter unavailable"}
+                results[name] = {"status": "not_run", "value": None, "reason": self.unavailable_reason}
                 continue
             try:
                 if scorers is None:

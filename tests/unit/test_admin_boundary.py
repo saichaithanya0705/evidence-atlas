@@ -193,14 +193,14 @@ def _published_evaluation(root, run_id="eval-2026-09-30"):
         },
         "latency": {"dense_only": {"count": 1, "median": 12.0}},
         "failure_categories": {"retrieval_miss": 1},
-        "robustness": {"dense_only": {"status": "completed", "value": {"scenarios": {"noisy_query": {"mean_metric_deltas": {"recall@10": -0.1}}}}, "reason": None, "queries": {}}},
+        "robustness": {"dense_only": {"status": "completed", "value": {"scenarios": {"noisy_query": {"mean_metric_deltas": {"recall@10": -0.1, "query_context_coverage": -0.2, "context_precision": -0.1, "candidate_filter_compliance": -0.3}}}}, "reason": None, "queries": {}}},
         "limitations": ["optional metric fixture"],
         "prompts": "must not be returned",
         "model_output": "must not be returned",
         "api_key": "must not be returned",
         "hidden_trace": {"secret": True},
     }
-    query = {"query_id": "q1", "variants": {"dense_only": {"diagnostics": [{"category": "retriever_miss", "evidence": "hidden"}], "robustness": {"status": "completed", "scenarios": {"noisy_query": {"metric_deltas": {"recall@10": -0.1}}}, "raw_output": "hidden"}}}}
+    query = {"query_id": "q1", "variants": {"dense_only": {"diagnostics": [{"category": "retriever_miss", "evidence": "hidden"}], "metrics": {"query_context_coverage": 0.6, "context_precision": 0.7, "candidate_filter_compliance": 0.8}, "robustness": {"status": "completed", "scenarios": {"noisy_query": {"metric_deltas": {"recall@10": -0.1, "query_context_coverage": -0.2, "context_precision": -0.1, "candidate_filter_compliance": -0.3}}}, "raw_output": "hidden"}}}}
     report_bytes = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode()
     query_bytes = (json.dumps(query, sort_keys=True, indent=2) + "\n").encode()
     markdown_bytes = render_markdown(report).encode()
@@ -240,6 +240,15 @@ def test_evaluations_require_admin_and_list_only_promoted_reports(client, tmp_pa
     assert body["benchmark_checksum"] == "a" * 64
     assert "prompts" not in body and "model_output" not in body and "api_key" not in body and "hidden_trace" not in body
     assert body["queries"][0]["variants"]["dense_only"]["diagnostics"] == [{"category": "retriever_miss"}]
+    assert body["robustness"]["dense_only"]["value"]["scenarios"]["noisy_query"] == {
+        "query_context_coverage": -0.2, "context_precision": -0.1, "candidate_filter_compliance": -0.3,
+    }
+    assert body["queries"][0]["variants"]["dense_only"]["metrics"] == {
+        "query_context_coverage": 0.6, "context_precision": 0.7, "candidate_filter_compliance": 0.8,
+    }
+    assert body["queries"][0]["variants"]["dense_only"]["robustness"]["scenarios"]["noisy_query"] == {
+        "query_context_coverage": -0.2, "context_precision": -0.1, "candidate_filter_compliance": -0.3,
+    }
     assert "evidence" not in str(body) and "raw_output" not in str(body)
     assert get_settings().EVALUATION_REPORTS_DIR == str(root)
     assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == original_files

@@ -27,6 +27,7 @@ _METRIC_SUFFIXES = {
     "citation_validity", "citation_precision", "robustness",
     *(f"ragas.{name}" for name in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness")),
 }
+_ROBUSTNESS_METRICS = {"query_context_coverage", "context_precision", "candidate_filter_compliance"}
 
 
 class _StrictResponse(BaseModel):
@@ -136,7 +137,7 @@ def _metric_value(name: str, value: Any) -> Any:
                     continue
                 deltas = details.get("mean_metric_deltas")
                 if isinstance(deltas, Mapping):
-                    selected[scenario] = {metric: float(delta) for metric, delta in deltas.items() if _valid_query_metric(metric) and isinstance(delta, (int, float)) and math.isfinite(delta)}
+                    selected[scenario] = {metric: float(delta) for metric, delta in deltas.items() if metric in _ROBUSTNESS_METRICS and isinstance(delta, (int, float)) and math.isfinite(delta)}
             result["scenarios"] = selected
         return result
     raise _InvalidBundle
@@ -150,7 +151,11 @@ def _is_metric_name(name: str, variants: list[str]) -> bool:
 
 
 def _valid_query_metric(name: Any) -> bool:
-    return isinstance(name, str) and (name in {"filter_accuracy", "route_accuracy", "subquestion_coverage", "answer_completeness", "span_precision", "attribution_precision", "supported_claim_rate", "citation_validity", "citation_precision"} or bool(re.fullmatch(r"(?:recall|precision|mrr|ndcg)@\d+", name)))
+    return isinstance(name, str) and (name in {"filter_accuracy", "route_accuracy", "subquestion_coverage", "answer_completeness", "span_precision", "attribution_precision", "supported_claim_rate", "citation_validity", "citation_precision", *_ROBUSTNESS_METRICS} or bool(re.fullmatch(r"(?:recall|precision|mrr|ndcg)@\d+", name)))
+
+
+def _valid_robustness_metric(name: Any) -> bool:
+    return isinstance(name, str) and name in _ROBUSTNESS_METRICS
 
 
 def _metric_records(metrics: Any, variants: list[str]) -> dict[str, Any]:
@@ -277,7 +282,7 @@ def _query_projection(root: Path, query_dir: Path, checksummed_queries: Mapping[
                             continue
                         deltas = result.get("metric_deltas", {})
                         if isinstance(deltas, Mapping):
-                            safe_scenarios[scenario] = {name: float(delta) for name, delta in deltas.items() if _valid_query_metric(name) and isinstance(delta, (int, float)) and math.isfinite(delta)}
+                            safe_scenarios[scenario] = {name: float(delta) for name, delta in deltas.items() if _valid_robustness_metric(name) and isinstance(delta, (int, float)) and math.isfinite(delta)}
                 item["robustness"] = {"status": raw_robustness.get("status", "completed"), "scenarios": safe_scenarios}
             projected_variants[variant] = item
         rows.append({"query_id": artifact["query_id"][:128], "variants": projected_variants})

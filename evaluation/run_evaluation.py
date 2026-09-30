@@ -26,8 +26,8 @@ from backend.app.retrieval.bm25 import BM25Index
 from evaluation.citations import evaluate_answer_citations
 from evaluation.benchmark import file_checksum, load_benchmark, stable_checksum
 from evaluation.metrics import (
-    citation_precision, citation_validity, failure_category_counts, filter_accuracy, latency_summary,
-    ndcg_at_k, precision_at_k, recall_at_k, reciprocal_rank,
+    citation_precision, citation_validity, failure_category_counts, latency_summary,
+    ndcg_at_k, precision_at_k, recall_at_k, reciprocal_rank, route_confusion,
 )
 from evaluation.reporting import ReportStore
 from evaluation.diagnostics import diagnose_failures
@@ -235,6 +235,8 @@ def evaluate_saved_variants(
     run_id: str,
     top_k: int = 10,
     robustness_runner: Callable[[Any, Any, dict[str, Any]], dict[str, float | int | None]] | None = None,
+    allow_subset: bool = False,
+    ragas_evaluator: Any = None,
 ) -> dict[str, Any]:
     """Score available Task 7 artifacts and promote only a complete benchmark run."""
     from evaluation.variants import QueryEvaluationArtifact
@@ -262,12 +264,16 @@ def evaluate_saved_variants(
         if len(loaded[variant]) not in (0, len(dataset.entries)):
             raise ValueError(f"variant {variant} is partial; refusing to promote an incomplete run")
     active = [name for name in variants if loaded[name]]
+    if not allow_subset and set(active) != set(variants):
+        missing = [name for name in variants if not loaded[name]]
+        raise ValueError(f"report promotion requires complete artifacts for all four variants; missing: {', '.join(missing)}")
     if not active:
         raise ValueError("no complete variant artifacts were found")
 
     metric_results: dict[str, dict[str, Any]] = {}
     per_query: dict[str, dict[str, Any]] = {entry.id: {"query_id": entry.id, "variants": {}} for entry in dataset.entries}
     failures: list[str] = []
+    answer_status_distribution: dict[str, int] = {}
     variant_latencies: dict[str, list[float]] = {name: [] for name in active}
     robustness_results: dict[str, dict[str, Any]] = {name: {} for name in active}
     robustness_errors: dict[str, list[str]] = {name: [] for name in active}
@@ -281,6 +287,12 @@ def evaluate_saved_variants(
     for variant in active:
         metric_values: dict[str, list[float]] = {name: [] for name in (f"recall@{top_k}", f"precision@{top_k}", f"mrr@{top_k}", f"ndcg@{top_k}")}
         filter_values: list[float] = []
+        filter_missing = []
+        coverage_values: list[float] = []
+        completeness_values: list[float] = []
+        attribution_correct = attribution_total = 0
+        supported_claims = material_claims = 0
+        span_numerator = span_denominator = 0
         for entry in dataset.entries:
             artifact = loaded[variant][entry.id]
             judged = {judgment.pmid: judgment.relevance for judgment in entry.judgments}
@@ -294,13 +306,97 @@ def evaluate_saved_variants(
             for name, value in query_metrics.items():
                 metric_values[name].append(float(value or 0.0))
             variant_latencies[variant].append(artifact.latency_ms)
-            expected_filters = {"study_types": [entry.study_type]}
-            applied_filters = artifact.metadata_filters
-            filter_value = filter_accuracy(expected_filters, applied_filters)
+            constraints: dict[str, Any] = {"study_types": [entry.study_type]}
+            for lower, upper in (("year_min", "year_max"), ("year_from", "year_to")):
+                if artifact.metadata_filters.get(lower) is not None:
+                    constraints[lower] = artifact.metadata_filters[lower]
+                if artifact.metadata_filters.get(upper) is not None:
+                    constraints[upper] = artifact.metadata_filters[upper]
+            candidate_checks: list[bool] = []
+            missing_fields: set[str] = set()
+            for candidate in artifact.candidates:
+                if not isinstance(candidate, dict) or "filter_satisfied" not in candidate:
+                    missing_fields.add("candidate.filter_satisfied")
+                    continue
+                if not isinstance(candidate["filter_satisfied"], bool):
+                    missing_fields.add("candidate.filter_satisfied")
+                    continue
+                compliant = candidate["filter_satisfied"]
+                actual_type = candidate.get("study_type")
+                if not actual_type:
+                    missing_fields.add("candidate.study_type")
+                else:
+                    expected_types = constraints["study_types"]
+                    compliant = compliant and any(
+                        str(actual_type).casefold() == str(expected).casefold()
+                        or str(actual_type).casefold() in str(expected).casefold()
+                        or str(expected).casefold() in str(actual_type).casefold()
+                        for expected in expected_types
+                    )
+                year = candidate.get("year")
+                for low_key, high_key in (("year_min", "year_max"), ("year_from", "year_to")):
+                    low = constraints.get(low_key)
+                    high = constraints.get(high_key)
+                    if low is not None or high is not None:
+                        if year is None:
+                            missing_fields.add("candidate.year")
+                            continue
+                        try:
+                            numeric_year = int(year)
+                        except (TypeError, ValueError):
+                            missing_fields.add("candidate.year")
+                            continue
+                        compliant = compliant and (low is None or numeric_year >= int(low)) and (high is None or numeric_year <= int(high))
+                candidate_checks.append(compliant)
+            filter_value = (sum(candidate_checks) / len(candidate_checks)) if candidate_checks and not missing_fields else None
             if filter_value is not None:
                 filter_values.append(filter_value)
+            else:
+                filter_missing.append(entry.id)
             evidence_pmids = [str(item.get("pmid")) for item in (artifact.evidence or []) if isinstance(item, dict) and item.get("pmid")]
             answer = artifact.answer or {}
+            if variant == "agentic" and isinstance(answer, dict):
+                status = answer.get("answer_status")
+                if status:
+                    answer_status_distribution[str(status)] = answer_status_distribution.get(str(status), 0) + 1
+            plan = artifact.research_plan or {}
+            plan_questions = plan.get("subquestions", []) if isinstance(plan, dict) else []
+            required_ids = [str(item.get("id")) for item in plan_questions if isinstance(item, dict) and item.get("id")]
+            coverage_rows = artifact.coverage
+            if isinstance(coverage_rows, dict):
+                coverage_rows = [
+                    {"subquestion_id": key, "status": value.get("status") if isinstance(value, dict) else value}
+                    for key, value in coverage_rows.items()
+                ]
+            elif isinstance(coverage_rows, list) and coverage_rows and isinstance(coverage_rows[-1], dict) and isinstance(coverage_rows[-1].get("coverage"), list):
+                coverage_rows = coverage_rows[-1]["coverage"]
+            if required_ids and isinstance(coverage_rows, list):
+                covered_ids = {
+                    str(item.get("subquestion_id")) for item in coverage_rows
+                    if isinstance(item, dict) and item.get("status") == "COVERED"
+                }
+                coverage_value = len(set(required_ids) & covered_ids) / len(set(required_ids))
+                coverage_values.append(coverage_value)
+            answered_ids = answer.get("answered_subquestions") or answer.get("covered_subquestions") if isinstance(answer, dict) else None
+            if required_ids and isinstance(answered_ids, list):
+                completeness_values.append(len(set(required_ids) & set(map(str, answered_ids))) / len(set(required_ids)))
+            claim_attributions = answer.get("claim_attributions") if isinstance(answer, dict) else None
+            if isinstance(claim_attributions, list):
+                verdicts = [item.get("correct") for item in claim_attributions if isinstance(item, dict) and isinstance(item.get("correct"), bool)]
+                attribution_correct += sum(verdicts)
+                attribution_total += len(verdicts)
+            claim_verifications = answer.get("claim_verifications") if isinstance(answer, dict) else None
+            if isinstance(claim_verifications, list):
+                verdicts = [item.get("supported") for item in claim_verifications if isinstance(item, dict) and isinstance(item.get("supported"), bool)]
+                supported_claims += sum(verdicts)
+                material_claims += len(verdicts)
+            evidence_rows = artifact.evidence or []
+            candidate_text = " ".join(str(item.get("abstract") or "") for item in artifact.candidates if isinstance(item, dict))
+            spans = [str(span) for row in evidence_rows if isinstance(row, dict) for span in (row.get("supporting_text_spans") or []) if str(span).strip()]
+            if spans:
+                span_denominator += len(spans)
+                span_numerator += sum(span in candidate_text for span in spans)
+            citations_for_query = answer.get("cited_pmids") if isinstance(answer, dict) else None
             citations = answer.get("cited_pmids") if isinstance(answer, dict) else None
             diagnostic_input = {
                 "relevant_pmids": entry.relevant_pmids,
@@ -320,6 +416,23 @@ def evaluate_saved_variants(
                 "configuration_hash": artifact.configuration_hash,
                 "diagnostics": query_diagnostics,
             }
+            if variant == "agentic" and isinstance(answer, dict):
+                query_details["answer_status"] = answer.get("answer_status")
+            if filter_value is not None:
+                query_details["filter_accuracy"] = {"status": "completed", "value": filter_value, "reason": None}
+            else:
+                query_details["filter_accuracy"] = {"status": "not_run", "value": None, "reason": f"candidate metadata missing required constraints: {', '.join(sorted(missing_fields)) or 'no returned candidates'}"}
+            if required_ids and isinstance(coverage_rows, list):
+                query_details["subquestion_coverage"] = {"status": "completed", "value": coverage_value, "reason": None}
+            if required_ids and isinstance(answered_ids, list):
+                query_details["answer_completeness"] = {"status": "completed", "value": len(set(required_ids) & set(map(str, answered_ids))) / len(set(required_ids)), "reason": None}
+            if citations_for_query is not None:
+                query_details["citation_precision"] = {"status": "completed", "value": citation_precision(citations_for_query, entry.relevant_pmids), "reason": None} if citations_for_query else {"status": "not_run", "value": None, "reason": "answer contains no citations"}
+                query_details["citation_validity"] = {"status": "completed", "value": citation_validity(citations_for_query, corpus_pmids), "reason": None} if citations_for_query and corpus_pmids else {"status": "not_run", "value": None, "reason": "citations or active-corpus PMID membership unavailable"}
+            if spans:
+                query_details["span_precision"] = {"status": "completed", "value": sum(span in candidate_text for span in spans) / len(spans), "reason": None}
+            if isinstance(plan, dict) and plan.get("route"):
+                query_details["route_accuracy"] = {"status": "completed", "value": float(plan["route"] == entry.expected_route), "reason": None}
             if effective_robustness_runner is not None:
                 contexts = [
                     str(candidate.get("abstract") or candidate.get("context") or candidate.get("title"))
@@ -355,16 +468,55 @@ def evaluate_saved_variants(
             metric_results[f"{variant}.{name}"] = {"status": "completed", "value": sum(values) / len(values), "reason": None}
         metric_results[f"{variant}.filter_accuracy"] = (
             {"status": "completed", "value": sum(filter_values) / len(filter_values), "reason": None}
-            if filter_values else {"status": "not_run", "value": None, "reason": "no expected filters were available"}
+            if filter_values and not filter_missing else {"status": "not_run", "value": None, "reason": "candidate constraint metadata unavailable for queries: " + ", ".join(filter_missing or ["all queries"])}
         )
         metric_results[f"{variant}.latency_ms"] = {"status": "completed", "value": latency_summary(variant_latencies[variant]), "reason": None}
-        metric_results[f"{variant}.route_accuracy"] = {"status": "not_run", "value": None, "reason": "saved variant artifacts do not include an independently scored predicted route"}
-        metric_results[f"{variant}.route_confusion"] = {"status": "not_run", "value": None, "reason": "saved variant artifacts do not include predicted routes"}
-        for metric in ("subquestion_coverage", "answer_completeness", "span_precision", "attribution_precision", "supported_claim_rate"):
-            metric_results[f"{variant}.{metric}"] = {"status": "not_run", "value": None, "reason": "saved artifacts do not contain the required validated reference or claim-level fields"}
-        metric_results[f"{variant}.citation_validity"] = {"status": "not_run", "value": None, "reason": "no complete, validated citation labels are available for every query"}
-        for metric in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness"):
-            metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": "reference answer or configured RAGAS provider is unavailable"}
+        route_rows = [item for item in loaded[variant].values() if item.research_plan and item.research_plan.get("route")]
+        metric_results[f"{variant}.route_accuracy"] = {"status": "completed", "value": sum(item.research_plan["route"] == item.expected_route for item in route_rows) / len(route_rows), "reason": None} if route_rows else {"status": "not_run", "value": None, "reason": "no saved research plan contains a predicted route"}
+        metric_results[f"{variant}.route_confusion"] = {"status": "completed", "value": route_confusion([item.expected_route for item in route_rows], [item.research_plan["route"] for item in route_rows]), "reason": None} if route_rows else {"status": "not_run", "value": None, "reason": "no saved research plan contains a predicted route"}
+        metric_results[f"{variant}.subquestion_coverage"] = {"status": "completed", "value": sum(coverage_values) / len(coverage_values), "reason": None} if coverage_values else {"status": "not_run", "value": None, "reason": "saved plan and coverage history do not contain required subquestion IDs and statuses"}
+        completeness_missing_reason = "retrieval-only variant has no answer payload" if variant != "agentic" else "answer payload lacks explicit answered subquestion IDs"
+        metric_results[f"{variant}.answer_completeness"] = {"status": "completed", "value": sum(completeness_values) / len(completeness_values), "reason": None} if completeness_values else {"status": "not_run", "value": None, "reason": completeness_missing_reason}
+        metric_results[f"{variant}.span_precision"] = {"status": "completed", "value": span_numerator / span_denominator, "reason": None} if span_denominator else {"status": "not_run", "value": None, "reason": "saved evidence contains no supporting spans to check against returned abstracts"}
+        metric_results[f"{variant}.attribution_precision"] = {"status": "completed", "value": attribution_correct / attribution_total, "reason": None} if attribution_total else {"status": "not_run", "value": None, "reason": "saved response has no claim-to-citation attribution verdicts"}
+        metric_results[f"{variant}.supported_claim_rate"] = {"status": "completed", "value": supported_claims / material_claims, "reason": None} if material_claims else {"status": "not_run", "value": None, "reason": "saved response has no validated claim-level support verdicts"}
+        if variant != "agentic":
+            for metric in ("citation_validity", "citation_precision"):
+                metric_results[f"{variant}.{metric}"] = {"status": "not_run", "value": None, "reason": "retrieval-only variant has no answer citations"}
+        ragas_names = ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness")
+        ragas_per_metric: dict[str, list[float]] = {name: [] for name in ragas_names}
+        ragas_missing: dict[str, list[str]] = {name: [] for name in ragas_names}
+        ragas_failures: dict[str, list[str]] = {name: [] for name in ragas_names}
+        if variant == "agentic":
+            if ragas_evaluator is None:
+                from evaluation.ragas_metrics import RagasEvaluator
+                effective_ragas_evaluator = RagasEvaluator()
+            else:
+                effective_ragas_evaluator = ragas_evaluator
+            for entry in dataset.entries:
+                artifact = loaded[variant][entry.id]
+                answer = artifact.answer or {}
+                contexts = [str(item.get("abstract") or "") for item in artifact.candidates if isinstance(item, dict) and item.get("abstract")]
+                sample = {"user_input": entry.query, "response": answer.get("synthesis"), "retrieved_contexts": contexts}
+                evaluated = effective_ragas_evaluator.evaluate(sample)
+                for metric, result in evaluated.items():
+                    if metric in ragas_per_metric and result.get("status") == "completed":
+                        ragas_per_metric[metric].append(float(result["value"]))
+                    elif metric in ragas_failures and result.get("status") == "failed":
+                        ragas_failures[metric].append(str(result.get("reason") or "provider failed"))
+                    elif metric in ragas_missing:
+                        ragas_missing[metric].append(str(result.get("reason") or result.get("status") or "unavailable"))
+        for metric in ragas_names:
+            values = ragas_per_metric[metric]
+            if variant != "agentic":
+                metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": "retrieval-only variant has no answer-generation sample"}
+            elif ragas_failures[metric]:
+                metric_results[f"{variant}.ragas.{metric}"] = {"status": "failed", "value": None, "reason": sorted(set(ragas_failures[metric]))[0]}
+            elif values and not ragas_missing[metric]:
+                metric_results[f"{variant}.ragas.{metric}"] = {"status": "completed", "value": sum(values) / len(values), "reason": None}
+            else:
+                reason = sorted(set(ragas_missing[metric]))[0] if ragas_missing[metric] else "configured RAGAS evaluator did not return a result for this metric"
+                metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": reason}
         if effective_robustness_runner is None:
             metric_results[f"{variant}.robustness"] = {"status": "not_run", "value": None, "reason": "a retrieval and metric callback for perturbed inputs was not supplied"}
         elif robustness_errors[variant]:
@@ -415,6 +567,7 @@ def evaluate_saved_variants(
         "metrics": metric_results,
         "latency": {variant: latency_summary(values) for variant, values in variant_latencies.items()},
         "failure_categories": failure_category_counts(failures),
+        "answer_status_distribution": answer_status_distribution,
         "robustness": {
             variant: {
                 "status": metric_results[f"{variant}.robustness"]["status"],
@@ -445,12 +598,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reports-dir", "--output-dir", dest="reports_dir", type=Path, default=Path("evaluation/reports"))
     parser.add_argument("--run-id", help="Immutable report ID; defaults to a checksum-derived ID")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--allow-subset", action="store_true", help="Explicitly permit a report containing only the complete variants that are present; such reports are not suitable for four-variant promotion.")
+    parser.add_argument("--ragas-provider", help="Optional provider factory as module:callable; the callable returns an adapter with score(scorer, sample).")
     args = parser.parse_args(argv)
     if len(args.variants) != 4 or set(args.variants) != {"dense_only", "hybrid", "reranked", "agentic"}:
         parser.error("report promotion requires exactly all four variants: dense_only hybrid reranked agentic")
     try:
         run_id = args.run_id or f"eval-{file_checksum(args.benchmark)[:12]}-{stable_checksum({str(args.artifacts_dir): args.top_k})[:12]}"
-        report = evaluate_saved_variants(args.benchmark, args.artifacts_dir, args.reports_dir, run_id=run_id, top_k=args.top_k)
+        ragas_evaluator = None
+        if args.ragas_provider:
+            import importlib
+            from evaluation.ragas_metrics import RagasEvaluator
+            module_name, separator, factory_name = args.ragas_provider.partition(":")
+            if not separator or not module_name or not factory_name:
+                raise ValueError("--ragas-provider must be formatted as module:callable")
+            try:
+                factory = getattr(importlib.import_module(module_name), factory_name)
+                ragas_evaluator = RagasEvaluator(provider=factory())
+            except (ImportError, AttributeError) as exc:
+                ragas_evaluator = RagasEvaluator(unavailable_reason=f"configured RAGAS provider unavailable: {type(exc).__name__}")
+            except Exception as exc:
+                ragas_evaluator = RagasEvaluator(unavailable_reason=f"configured RAGAS provider initialization failed: {type(exc).__name__}")
+        report = evaluate_saved_variants(args.benchmark, args.artifacts_dir, args.reports_dir, run_id=run_id, top_k=args.top_k, allow_subset=args.allow_subset, ragas_evaluator=ragas_evaluator)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
     print(json.dumps(report, sort_keys=True))

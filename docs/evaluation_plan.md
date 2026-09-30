@@ -18,10 +18,12 @@ From the repository root in PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m evaluation.ablation --benchmark data/evaluation/benchmark_v2.json --variant all --resume --output-dir data/evaluation/variants
-.\.venv\Scripts\python.exe -m evaluation.run_evaluation --benchmark data/evaluation/benchmark_v2.json --variants dense_only hybrid reranked agentic --output-dir evaluation/reports
+.\.venv\Scripts\python.exe -m evaluation.run_evaluation --benchmark data/evaluation/benchmark_v2.json --variants dense_only hybrid reranked agentic --output-dir evaluation/reports --run-id eval-1e50313b8ba2-task13-final
 ```
 
 The first command executes each variant and writes resumable query artifacts. The second validates those artifacts, calculates aggregate metrics, and promotes a checksum-valid immutable report. Record the exact benchmark checksum, run ID, and metric statuses in [evaluation_report.md](evaluation_report.md). The dashboard and API at `/admin/evaluations` are administrator-only; ordinary-user research responses do not expose evaluation results.
+
+The documented promotion command requires all four complete variant directories, even when the requested CLI variant list names all four. The explicit `--allow-subset` switch exists for diagnostic ablations only; such a report records only variants that are present and must not be used as the ordinary four-variant comparison. Optional RAGAS scoring can be configured with `--ragas-provider package.module:factory`; the factory returns an adapter implementing `score(scorer, sample)`. Provider errors and missing scorer prerequisites are represented per metric. Reference-based metrics remain `not_run` until real reference answers are added to the versioned benchmark.
 
 ## Limits
 

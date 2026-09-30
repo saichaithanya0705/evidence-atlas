@@ -248,5 +248,6 @@ def test_task11_promoted_report_is_complete_checksum_valid_and_matches_docs():
     for variant in ("dense_only", "hybrid", "reranked"):
         assert report["metrics"][f"{variant}.answer_completeness"] == {
             "status": "not_run", "value": None,
-            "reason": "saved artifacts do not contain the required validated reference or claim-level fields",
+            "reason": "retrieval-only variant has no answer payload",
         }
+        assert report["metrics"][f"{variant}.ragas.faithfulness"]["reason"] == "retrieval-only variant has no answer-generation sample"
