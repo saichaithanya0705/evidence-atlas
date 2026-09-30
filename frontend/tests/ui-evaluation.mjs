@@ -25,10 +25,10 @@ async function scenario(role) {
     else if (url.pathname.startsWith('/api/admin/evaluations')) {
       evaluationRequests.push(url.pathname);
       data = url.pathname === '/api/admin/evaluations'
-        ? { items: [{ run_id: 'run-42', report_checksum: 'd'.repeat(64), benchmark_checksum: 'a'.repeat(64), corpus_checksum: 'b'.repeat(64), configuration_checksum: 'c'.repeat(64), query_count: 2, variants: ['dense_only', 'hybrid', 'reranked', 'agentic'] }] }
+        ? { items: [{ run_id: 'run-42', report_checksum: 'd'.repeat(64), benchmark_checksum: 'a'.repeat(64), corpus_checksum: 'b'.repeat(64), configuration_checksum: 'c'.repeat(64), query_count: 2, variants: ['dense_only', 'hybrid', 'agentic'] }] }
         : {
           run_id: 'run-42', report_checksum: 'd'.repeat(64), benchmark_checksum: 'a'.repeat(64), corpus_checksum: 'b'.repeat(64), configuration_checksum: 'c'.repeat(64), query_count: 2,
-          variants: ['dense_only', 'hybrid', 'reranked', 'agentic'],
+          variants: ['dense_only', 'hybrid', 'agentic'],
           metrics: {
             'dense_only.recall@10': { status: 'completed', value: 0.75, reason: null },
             'hybrid.faithfulness': { status: 'not_run', value: null, reason: 'Credentials are not configured' },
@@ -63,6 +63,11 @@ async function scenario(role) {
     await page.getByText('Credentials are not configured').waitFor();
     await page.getByText('retrieval_miss').first().waitFor();
     await page.getByText('-0.1').first().waitFor();
+    const ablation = page.locator('.evaluation-section').filter({ has: page.getByRole('heading', { name: 'Four-variant ablation' }) });
+    assert.deepEqual(await ablation.locator('thead th').allTextContents(), ['Metric', 'dense_only', 'hybrid', 'reranked', 'agentic']);
+    const missingVariantCell = ablation.locator('tbody tr').filter({ hasText: 'recall@10' }).locator('td').nth(2);
+    assert.match(await missingVariantCell.innerText(), /not_run/i);
+    assert.match(await missingVariantCell.innerText(), /variant was not included in this evaluation run/i);
     assert.ok(evaluationRequests.includes('/api/admin/evaluations'));
     assert.equal(evaluationRequests.filter(path => path === '/api/admin/evaluations/run-42').length, 1);
     assert.ok(evaluationRequests.every(path => path === '/api/admin/evaluations' || path === '/api/admin/evaluations/run-42'));
