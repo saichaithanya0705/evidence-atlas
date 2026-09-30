@@ -1,4 +1,4 @@
-"""Run BM25 retrieval and adaptive-router checks against frozen demo labels.
+"""Evaluate saved comparable variant artifacts and promote immutable reports.
 
 The bundled corpus and judgments are for software demonstrations, not clinical
 evidence or a representative PubMed benchmark. Citation checks run only when
@@ -8,6 +8,7 @@ caller-provided answer artifacts are supplied with ``--answers``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import math
@@ -22,6 +23,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.app.query.query_service import QueryAnalysisService
 from backend.app.retrieval.bm25 import BM25Index
 from evaluation.citations import evaluate_answer_citations
+from evaluation.benchmark import file_checksum, load_benchmark, stable_checksum
+from evaluation.metrics import (
+    citation_precision, citation_validity, failure_category_counts, filter_accuracy, latency_summary,
+    ndcg_at_k, precision_at_k, recall_at_k, reciprocal_rank,
+)
+from evaluation.reporting import ReportStore
+from evaluation.diagnostics import diagnose_failures
 
 logger = logging.getLogger("evaluation")
 DEFAULT_QUERY_FILE = PROJECT_ROOT / "data" / "evaluation" / "queries.json"
@@ -171,26 +179,155 @@ def run(query_file: Path, index_file: Path, top_k: int, answers_file: Path | Non
     return report
 
 
+def evaluate_saved_variants(
+    benchmark_path: str | Path,
+    artifacts_dir: str | Path,
+    reports_dir: str | Path,
+    *,
+    run_id: str,
+    top_k: int = 10,
+) -> dict[str, Any]:
+    """Score available Task 7 artifacts and promote only a complete benchmark run."""
+    from evaluation.variants import QueryEvaluationArtifact
+
+    dataset = load_benchmark(benchmark_path)
+    base = Path(artifacts_dir)
+    variants = ("dense_only", "hybrid", "reranked", "agentic")
+    loaded: dict[str, dict[str, QueryEvaluationArtifact]] = {name: {} for name in variants}
+    for variant in variants:
+        for entry in dataset.entries:
+            path = base / variant / f"{entry.id}.json"
+            if not path.is_file():
+                continue
+            artifact = QueryEvaluationArtifact.model_validate_json(path.read_text(encoding="utf-8"))
+            if artifact.variant != variant or artifact.query_id != entry.id or artifact.query != entry.query:
+                raise ValueError(f"variant artifact identity mismatch: {path}")
+            loaded[variant][entry.id] = artifact
+        if len(loaded[variant]) not in (0, len(dataset.entries)):
+            raise ValueError(f"variant {variant} is partial; refusing to promote an incomplete run")
+    active = [name for name in variants if loaded[name]]
+    if not active:
+        raise ValueError("no complete variant artifacts were found")
+
+    metric_results: dict[str, dict[str, Any]] = {}
+    per_query: dict[str, dict[str, Any]] = {entry.id: {"query_id": entry.id, "variants": {}} for entry in dataset.entries}
+    failures: list[str] = []
+    variant_latencies: dict[str, list[float]] = {name: [] for name in active}
+    corpus_pmids = set()
+    try:
+        from evaluation.adjudication import load_corpus_pmids
+        corpus_pmids = load_corpus_pmids(dataset.corpus_path)
+    except (ImportError, OSError, ValueError, KeyError):
+        pass
+    for variant in active:
+        metric_values: dict[str, list[float]] = {name: [] for name in (f"recall@{top_k}", f"precision@{top_k}", f"mrr@{top_k}", f"ndcg@{top_k}")}
+        filter_values: list[float] = []
+        for entry in dataset.entries:
+            artifact = loaded[variant][entry.id]
+            judged = {judgment.pmid: judgment.relevance for judgment in entry.judgments}
+            ranking = artifact.candidate_pmids
+            query_metrics = {
+                f"recall@{top_k}": recall_at_k(ranking, judged, top_k),
+                f"precision@{top_k}": precision_at_k(ranking, judged, top_k),
+                f"mrr@{top_k}": reciprocal_rank(ranking, judged, top_k),
+                f"ndcg@{top_k}": ndcg_at_k(ranking, judged, top_k),
+            }
+            for name, value in query_metrics.items():
+                metric_values[name].append(float(value or 0.0))
+            variant_latencies[variant].append(artifact.latency_ms)
+            expected_filters = {"study_types": [entry.study_type]}
+            applied_filters = artifact.metadata_filters
+            filter_value = filter_accuracy(expected_filters, applied_filters)
+            if filter_value is not None:
+                filter_values.append(filter_value)
+            evidence_pmids = [str(item.get("pmid")) for item in (artifact.evidence or []) if isinstance(item, dict) and item.get("pmid")]
+            answer = artifact.answer or {}
+            citations = answer.get("cited_pmids") if isinstance(answer, dict) else None
+            diagnostic_input = {
+                "relevant_pmids": entry.relevant_pmids,
+                "candidate_pmids": ranking,
+                "claims": answer.get("claims", []) if isinstance(answer, dict) else [],
+                "required_subquestions": answer.get("required_subquestions", []) if isinstance(answer, dict) else [],
+                "covered_subquestions": answer.get("covered_subquestions", []) if isinstance(answer, dict) else [],
+            }
+            if artifact.evidence is not None or artifact.answer is not None:
+                diagnostic_input["context_pmids"] = evidence_pmids
+            query_diagnostics = diagnose_failures(diagnostic_input)
+            failures.extend(item["category"] for item in query_diagnostics)
+            query_details = {
+                "candidate_pmids": ranking,
+                "metrics": query_metrics,
+                "latency_ms": artifact.latency_ms,
+                "configuration_hash": artifact.configuration_hash,
+                "diagnostics": query_diagnostics,
+            }
+            if citations is not None:
+                query_details["citation_metrics"] = {
+                    "citation_validity": citation_validity(citations, corpus_pmids) if corpus_pmids else None,
+                    "citation_precision": citation_precision(citations, entry.relevant_pmids),
+                }
+            per_query[entry.id]["variants"][variant] = query_details
+        for name, values in metric_values.items():
+            metric_results[f"{variant}.{name}"] = {"status": "completed", "value": sum(values) / len(values), "reason": None}
+        metric_results[f"{variant}.filter_accuracy"] = (
+            {"status": "completed", "value": sum(filter_values) / len(filter_values), "reason": None}
+            if filter_values else {"status": "not_run", "value": None, "reason": "no expected filters were available"}
+        )
+        metric_results[f"{variant}.latency_ms"] = {"status": "completed", "value": latency_summary(variant_latencies[variant]), "reason": None}
+        metric_results[f"{variant}.route_accuracy"] = {"status": "not_run", "value": None, "reason": "saved variant artifacts do not include an independently scored predicted route"}
+        metric_results[f"{variant}.route_confusion"] = {"status": "not_run", "value": None, "reason": "saved variant artifacts do not include predicted routes"}
+        for metric in ("subquestion_coverage", "answer_completeness", "span_precision", "attribution_precision", "supported_claim_rate"):
+            metric_results[f"{variant}.{metric}"] = {"status": "not_run", "value": None, "reason": "saved artifacts do not contain the required validated reference or claim-level fields"}
+        metric_results[f"{variant}.citation_validity"] = {"status": "not_run", "value": None, "reason": "no complete, validated citation labels are available for every query"}
+        for metric in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness"):
+            metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": "reference answer or configured RAGAS provider is unavailable"}
+        metric_results[f"{variant}.robustness"] = {"status": "not_run", "value": None, "reason": "robustness evaluation requires rerunning retrieval on perturbed inputs"}
+
+    for variant in active:
+        cited = [str(pmid) for artifact in loaded[variant].values() if artifact.answer for pmid in (artifact.answer.get("cited_pmids") or [])]
+        if corpus_pmids and cited:
+            metric_results[f"{variant}.citation_validity"] = {"status": "completed", "value": citation_validity(cited, corpus_pmids), "reason": None}
+        else:
+            metric_results[f"{variant}.citation_validity"] = {"status": "not_run", "value": None, "reason": "no citations were saved or active-corpus PMID membership could not be loaded"}
+        relevant = {entry.id: set(entry.relevant_pmids) for entry in dataset.entries}
+        judged_citations = [
+            (entry.id, str(pmid)) for entry in dataset.entries
+            for artifact in [loaded[variant][entry.id]] if artifact.answer
+            for pmid in (artifact.answer.get("cited_pmids") or [])
+        ]
+        if judged_citations:
+            metric_results[f"{variant}.citation_precision"] = {"status": "completed", "value": sum(pmid in relevant[query_id] for query_id, pmid in judged_citations) / len(judged_citations), "reason": None}
+        else:
+            metric_results[f"{variant}.citation_precision"] = {"status": "not_run", "value": None, "reason": "no citations were saved"}
+    report = {
+        "run_id": run_id,
+        "benchmark_checksum": file_checksum(benchmark_path),
+        "corpus_checksum": file_checksum(dataset.corpus_path),
+        "configuration_checksum": stable_checksum({variant: sorted(artifact.configuration_hash for artifact in loaded[variant].values()) for variant in active}),
+        "variants": active,
+        "query_count": len(dataset.entries),
+        "metrics": metric_results,
+        "latency": {variant: latency_summary(values) for variant, values in variant_latencies.items()},
+        "failure_categories": failure_category_counts(failures),
+        "limitations": ["Metrics reflect saved evaluation artifacts; optional provider and perturbation reruns are reported as not_run when inputs are absent."],
+    }
+    return ReportStore(reports_dir).publish(run_id, report, {f"{query_id}.json": payload for query_id, payload in per_query.items()})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--queries", type=Path, default=DEFAULT_QUERY_FILE, help="Frozen benchmark JSON")
-    parser.add_argument("--index", type=Path, default=PROJECT_ROOT / "data" / "processed" / "bm25_index.pkl", help="Built BM25 pickle")
+    parser.add_argument("--benchmark", type=Path, default=Path("data/evaluation/benchmark_v2.json"))
+    parser.add_argument("--artifacts-dir", type=Path, default=Path("data/evaluation/variants"))
+    parser.add_argument("--reports-dir", type=Path, default=Path("evaluation/reports"))
+    parser.add_argument("--run-id", help="Immutable report ID; defaults to a checksum-derived ID")
     parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--answers", type=Path, help="Optional JSON answer artifacts for deterministic citation checks")
-    parser.add_argument("--output", type=Path, help="Write report JSON (defaults to stdout)")
     args = parser.parse_args(argv)
     try:
-        report = run(args.queries.resolve(), args.index.resolve(), args.top_k, args.answers.resolve() if args.answers else None)
+        run_id = args.run_id or f"eval-{file_checksum(args.benchmark)[:12]}-{stable_checksum({str(args.artifacts_dir): args.top_k})[:12]}"
+        report = evaluate_saved_variants(args.benchmark, args.artifacts_dir, args.reports_dir, run_id=run_id, top_k=args.top_k)
     except (OSError, ValueError, KeyError) as exc:
         parser.error(str(exc))
-    serialized = json.dumps(report, indent=2, ensure_ascii=False)
-    if args.output:
-        output_path = args.output.resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(serialized + "\n", encoding="utf-8")
-        print(f"Wrote evaluation report to {output_path}")
-    else:
-        print(serialized)
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 
