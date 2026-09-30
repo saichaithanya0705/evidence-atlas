@@ -182,6 +182,9 @@ class ResearchResponse(BaseModel):
     evidence_gaps: List[str] = Field(default_factory=list, description="Identified missing evidence or open questions")
     audit_trace_url: str = Field(..., description="URL or relative endpoint to inspect full execution trace")
     retrieved_papers: List[RetrievalCandidate] = Field(default_factory=list, description="Top ranked retrieved abstracts")
+    query_plan: Any = Field(default=None, exclude=True)
+    research_plan: Optional[Dict[str, Any]] = Field(default=None, exclude=True)
+    coverage_statuses: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
     @field_validator("evidence_gaps")
     @classmethod
@@ -246,6 +249,44 @@ class PublicResearchResponse(BaseModel):
     @classmethod
     def sanitize_gaps(cls, values: List[str]) -> List[str]:
         return _sanitize_evidence_gaps(values)
+
+
+class PublicInterpretationSubquestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^sq-[1-8]$", max_length=5)
+    question: str = Field(min_length=1, max_length=500)
+
+
+class PublicCoverageStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subquestion_id: str = Field(pattern=r"^sq-[1-8]$", max_length=5)
+    status: Literal["COVERED", "PARTIAL", "UNCOVERED", "BLOCKED"]
+
+
+class PublicInterpretation(BaseModel):
+    """Sanitized query interpretation for ordinary users."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    canonical_question: str = Field(min_length=1, max_length=4000)
+    pico: PICOModel = Field(default_factory=PICOModel)
+    mesh_concepts: List[str] = Field(default_factory=list, max_length=50)
+    route: Literal["SIMPLE", "MODERATE", "COMPLEX"] = "SIMPLE"
+    subquestions: List[PublicInterpretationSubquestion] = Field(default_factory=list, max_length=8)
+    coverage_statuses: List[PublicCoverageStatus] = Field(default_factory=list, max_length=8)
+
+    @field_validator("canonical_question", "mesh_concepts")
+    @classmethod
+    def trim_interpretation_strings(cls, value):
+        if isinstance(value, str):
+            value = value.strip()[:4000]
+            if not value:
+                raise ValueError("Interpretation values must not be blank")
+            return value
+        cleaned = [str(item).strip()[:200] for item in value]
+        return [item for item in cleaned if item]
 
 
 class AdminVerifyResponse(BaseModel):

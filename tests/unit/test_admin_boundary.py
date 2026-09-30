@@ -88,6 +88,71 @@ def test_reader_research_excludes_diagnostics(client, monkeypatch):
     assert "channel_scores" not in body["retrieved_papers"][0]
 
 
+def test_admin_analyze_query_uses_stable_response_envelope(client, monkeypatch):
+    from backend.app.models.request_response import PICOModel, QueryPlan
+    from backend.app.auth import routes as auth_routes
+
+    class FakeQueryService:
+        def build_query_plan(self, query):
+            return QueryPlan(
+                original_query=query, clean_query=query, canonical_query="diabetes outcomes",
+                mesh_terms=["Diabetes Mellitus"], pico=PICOModel(population="Adults"),
+                route="MODERATE", router_confidence=0.84, router_reasoning="multi concept",
+            ), None
+
+    monkeypatch.setattr(main, "_query_service", FakeQueryService())
+    auth_routes._attempts.clear()
+    headers = sign_in(client, "admin", "admin-password-123")
+    response = client.post("/analyze-query", json={"query": "diabetes outcomes"}, headers=headers)
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"query_plan"}
+    assert response.json()["query_plan"]["canonical_query"] == "diabetes outcomes"
+    schema = client.get("/openapi.json").json()["paths"]["/analyze-query"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert schema == {"$ref": "#/components/schemas/AnalyzeQueryResponse"}
+
+
+def test_public_research_adds_only_safe_interpretation(client, monkeypatch):
+    from backend.app.models.request_response import PICOModel, QueryPlan
+
+    candidate = RetrievalCandidate(pmid="12345", title="Trial", abstract="Abstract", channel_scores={"dense": 0.8})
+    plan = QueryPlan(
+        original_query="diabetes", clean_query="diabetes", canonical_query="diabetes mellitus",
+        mesh_terms=["Diabetes Mellitus"], pico=PICOModel(population="Adults"), route="MODERATE",
+        router_confidence=0.94, router_reasoning="private explanation", subqueries=["adverse events"],
+    )
+    class FakeResearchService:
+        def research(self, query, filters, max_loops, request_id, event_sink=None):
+            return ResearchResponse(
+                request_id=request_id, query=query, canonical_query=plan.canonical_query, route=plan.route,
+                synthesis="Grounded result [PMID: 12345].", evidence_table=[], cited_pmids=["12345"],
+                citations_valid=True, citation_precision=1.0, consensus_level="consensus", evidence_gaps=[],
+                audit_trace_url=f"/trace/{request_id}", retrieved_papers=[candidate],
+                query_plan=plan, research_plan={"subquestions": [{"id": "sq-1", "question": "Assess outcomes", "dependencies": [], "concepts": ["outcomes"]}]},
+                coverage_statuses={"sq-1": "COVERED"},
+            )
+
+        def get_trace(self, request_id):
+            return {"request_id": request_id, "stages": []}
+
+    monkeypatch.setattr(main, "_get_research_service", lambda: FakeResearchService())
+    headers = sign_in(client, "reader", "reader-password-123")
+    response = client.post("/research", json={"query": "diabetes"}, headers=headers)
+
+    assert response.status_code == 200
+    interpretation = response.json()["interpretation"]
+    assert interpretation == {
+        "canonical_question": "diabetes mellitus",
+        "pico": {"population": "Adults", "intervention": None, "comparator": None, "outcome": None},
+        "mesh_concepts": ["Diabetes Mellitus"],
+        "route": "MODERATE",
+        "subquestions": [{"id": "sq-1", "question": "Assess outcomes"}],
+        "coverage_statuses": [{"subquestion_id": "sq-1", "status": "COVERED"}],
+    }
+    encoded = str(interpretation).lower()
+    assert not any(secret in encoded for secret in ("router_confidence", "router_reasoning", "scores", "trace", "retrieval_iteration"))
+
+
 def test_reader_cannot_read_linked_admin_trace_or_internal_metadata(client, monkeypatch, tmp_path):
     from backend.app.storage.audits import AuditStore
 

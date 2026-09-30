@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.core.config import get_settings
 from backend.app.models.request_response import (
+    AnalyzeQueryResponse,
     AnalyzeQueryRequest,
     ResearchRequest,
     SearchRequest,
@@ -198,16 +199,17 @@ def metrics(
     return telemetry.snapshot()
 
 
-@app.post("/analyze-query")
+@app.post("/analyze-query", response_model=AnalyzeQueryResponse)
 async def analyze_query(
     payload: AnalyzeQueryRequest,
     request: Request,
     account: Dict[str, Any] = Depends(require_admin_csrf),
-) -> Dict[str, Any]:
+) -> AnalyzeQueryResponse:
     plan, _ = await run_in_threadpool(_query_service.build_query_plan, payload.query)
     result = plan.model_dump(mode="json", exclude={"embeddings"})
-    AuditStore(get_settings().APP_DATABASE_PATH).finish(request.state.audit_id, "completed", result, {"query_plan": result})
-    return result
+    response = AnalyzeQueryResponse(query_plan=plan)
+    AuditStore(get_settings().APP_DATABASE_PATH).finish(request.state.audit_id, "completed", response.model_dump(mode="json"), {"query_plan": result})
+    return response
 
 
 @app.post("/search")
@@ -303,7 +305,7 @@ async def research(
     result = response.model_dump(mode="json")
     trace_payload = await run_in_threadpool(service.get_trace, request.state.audit_id)
     audit.finish(request.state.audit_id, "completed", result, trace_payload)
-    return result if is_admin else _public_research_response(result)
+    return result if is_admin else _public_research_response(response)
 
 
 @app.get("/paper/{pmid}")

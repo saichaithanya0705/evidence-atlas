@@ -196,6 +196,27 @@ def test_failed_turn_record_keeps_failure_status_without_fabricating_agent_actio
     assert failed.answer_status.value == "FAILED"
 
 
+def test_conversation_interpretation_contract_is_safe_and_persistable():
+    from backend.app.models.request_response import PublicInterpretation
+
+    interpretation = PublicInterpretation.model_validate({
+        "canonical_question": "diabetes mellitus",
+        "pico": {"population": "Adults", "intervention": None, "comparator": None, "outcome": None},
+        "mesh_concepts": ["Diabetes Mellitus"],
+        "route": "MODERATE",
+        "subquestions": [{"id": "sq-1", "question": "Assess outcomes"}],
+        "coverage_statuses": [{"subquestion_id": "sq-1", "status": "COVERED"}],
+    })
+    response = ConversationTurnResponse(
+        conversation_id="c-1", turn_id="t-2", action="RESEARCH", answer_status="SUPPORTED",
+        assistant_message="Supported", interpretation=interpretation, consensus_level="consensus",
+        progress_summary="Research complete", request_id="req-2",
+    )
+    assert response.model_dump(mode="json")["interpretation"] == interpretation.model_dump(mode="json")
+    with pytest.raises(ValidationError):
+        PublicInterpretation.model_validate({**interpretation.model_dump(), "router_reasoning": "private"})
+
+
 def test_evidence_gap_context_requires_complete_bounded_planner_inputs():
     values = {
         "standalone_question": "What are the safety outcomes?",

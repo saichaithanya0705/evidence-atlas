@@ -75,6 +75,19 @@ class ResearchResponse(BaseModel):
     audit_trace_url: str
 
 
+def test_analyze_query_contract_is_enveloped_and_declared_in_openapi():
+    from backend.app.main import app
+    from backend.app.models.request_response import AnalyzeQueryResponse, QueryPlan as ApiQueryPlan
+
+    plan = ApiQueryPlan(
+        original_query="diabetes", clean_query="diabetes", canonical_query="diabetes mellitus",
+        route="SIMPLE", router_confidence=0.9,
+    )
+    assert set(AnalyzeQueryResponse(query_plan=plan).model_dump(mode="json")) == {"query_plan"}
+    schema = app.openapi()["paths"]["/analyze-query"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert schema == {"$ref": "#/components/schemas/AnalyzeQueryResponse"}
+
+
 # ---------------------------------------------------------------------------
 # Reference Helpers & Invariant Evaluators
 # ---------------------------------------------------------------------------

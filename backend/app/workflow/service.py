@@ -987,6 +987,12 @@ class ResearchService:
                 evidence_gaps=response_gaps,
                 audit_trace_url=f"/trace/{request_id}",
                 retrieved_papers=workflow.ranked_candidates,
+                query_plan=workflow.initial_plan,
+                research_plan=workflow.research_plan.model_dump(mode="json"),
+                coverage_statuses={
+                    subquestion_id: coverage.status.value
+                    for subquestion_id, coverage in workflow.coverage.items()
+                },
             )
             if workflow.event_sink:
                 released_claims = len(_claims(response_text)) if audit_valid and citations else 0

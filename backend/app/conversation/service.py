@@ -25,6 +25,7 @@ from backend.app.models.request_response import (
     AgentAction,
     AnswerStatus,
     EvidenceRecord,
+    PublicInterpretation,
     RetrievalCandidate,
 )
 from backend.app.storage.conversations import ConversationBusyError
@@ -46,6 +47,9 @@ def _value(payload: Any, name: str, default=None):
 
 def public_research_projection(payload: Any) -> dict[str, Any]:
     """Keep evidence and safe paper metadata while dropping diagnostics and scores."""
+    query_plan = _value(payload, "query_plan")
+    research_plan = _value(payload, "research_plan")
+    coverage_statuses = _value(payload, "coverage_statuses", {}) or {}
     source = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else dict(payload)
     allowed = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps"}
     result = {key: source[key] for key in allowed if key in source}
@@ -62,14 +66,61 @@ def public_research_projection(payload: Any) -> dict[str, Any]:
                     channels.extend(key for key in mapping if isinstance(key, str) and key.strip())
             public_row["retrieval_channels"] = list(dict.fromkeys(channels))
         else:
-            public_row["retrieval_channels"] = []
+            channels = value.get("retrieval_channels", [])
+            public_row["retrieval_channels"] = list(dict.fromkeys(
+                item.strip() for item in channels if isinstance(item, str) and item.strip()
+            )) if isinstance(channels, list) else []
         result["evidence_table"].append(public_row)
     result["retrieved_papers"] = [
         {key: value for key, value in (item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)).items()
          if key in _PUBLIC_CANDIDATE_FIELDS}
         for item in source.get("retrieved_papers", [])
     ]
+    raw_interpretation = source.get("interpretation")
+    if raw_interpretation is None:
+        raw_interpretation = _interpretation_source(query_plan, research_plan, coverage_statuses, source)
+    try:
+        result["interpretation"] = PublicInterpretation.model_validate(raw_interpretation).model_dump(mode="json")
+    except (TypeError, ValueError):
+        result["interpretation"] = _interpretation_source(None, None, {}, source)
     return result
+
+
+def _interpretation_source(query_plan: Any, research_plan: Any, coverage_statuses: Any, fallback: dict) -> dict[str, Any]:
+    """Build a bounded public interpretation from trusted plan and coverage values."""
+    canonical = _value(query_plan, "canonical_query") or fallback.get("canonical_query") or fallback.get("query") or "Research question"
+    pico = _value(query_plan, "pico", {}) or {}
+    if hasattr(pico, "model_dump"):
+        pico = pico.model_dump(mode="json")
+    mesh = _value(query_plan, "mesh_terms", []) or []
+    route = _value(query_plan, "route") or fallback.get("route") or "SIMPLE"
+    nodes = _value(research_plan, "subquestions", []) or []
+    subquestions = []
+    for node in nodes[:8]:
+        identifier = _value(node, "id")
+        question = _value(node, "question")
+        if isinstance(identifier, str) and isinstance(question, str):
+            subquestions.append({"id": identifier[:5], "question": " ".join(question.split())[:500]})
+    if isinstance(coverage_statuses, dict):
+        coverage_items = coverage_statuses.items()
+    else:
+        coverage_items = (
+            (_value(item, "subquestion_id"), _value(item, "status"))
+            for item in coverage_statuses or []
+        )
+    statuses = []
+    for identifier, status in coverage_items:
+        status = getattr(status, "value", status)
+        if isinstance(identifier, str) and isinstance(status, str):
+            statuses.append({"subquestion_id": identifier[:5], "status": status.upper()})
+    return {
+        "canonical_question": str(canonical).strip()[:4000] or "Research question",
+        "pico": pico,
+        "mesh_concepts": mesh[:50],
+        "route": route,
+        "subquestions": subquestions,
+        "coverage_statuses": statuses[:8],
+    }
 
 
 class ConversationService:
@@ -110,8 +161,9 @@ class ConversationService:
             if item["status"] == "completed" and item.get("public_response_json"):
                 try:
                     saved = json.loads(item["public_response_json"])
+                    saved = public_research_projection(saved)
                     public_fields = (
-                        "cited_pmids", "evidence_table", "retrieved_papers", "evidence_gaps", "consensus_level",
+                        "cited_pmids", "evidence_table", "retrieved_papers", "evidence_gaps", "consensus_level", "interpretation",
                     )
                     result = ConversationTurnPublicResult.model_validate({
                         field: saved[field] for field in public_fields if field in saved
@@ -260,8 +312,7 @@ class ConversationService:
                 status = AnswerStatus.INSUFFICIENT
                 consensus = "insufficient"
             else:
-                raw = research_response.model_dump(mode="json") if hasattr(research_response, "model_dump") else research_response
-                public_payload = public_research_projection(raw)
+                public_payload = public_research_projection(research_response)
                 status = _value(research_response, "answer_status", AnswerStatus.FAILED)
                 if isinstance(status, str):
                     status = AnswerStatus(status)
@@ -281,6 +332,7 @@ class ConversationService:
                 "retrieved_papers": public_payload.get("retrieved_papers", []),
                 "evidence_gaps": public_payload.get("evidence_gaps", []),
                 "consensus_level": consensus,
+                "interpretation": public_payload.get("interpretation"),
                 "progress_summary": "Evidence review completed." if research_response else "A follow-up detail is needed.",
                 "request_id": run_id,
             }

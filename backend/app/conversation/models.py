@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from backend.app.models.request_response import (
     AgentAction,
     AnswerStatus,
+    PublicInterpretation,
     PublicEvidenceRecord,
     PublicSearchCandidate,
 )
@@ -135,6 +136,7 @@ class ConversationTurnPublicResult(_StrictModel):
     retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)
     evidence_gaps: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
     consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"] | None = None
+    interpretation: PublicInterpretation | None = None
 
     @field_validator("cited_pmids", "evidence_gaps")
     @classmethod
@@ -170,6 +172,7 @@ class ConversationTurnResponse(_StrictModel):
     retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)
     evidence_gaps: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=50)
     consensus_level: Literal["consensus", "mixed", "conflicting", "insufficient"]
+    interpretation: PublicInterpretation | None = None
     progress_summary: str = Field(max_length=500)
     request_id: str = Field(max_length=100)
 

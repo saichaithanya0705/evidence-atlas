@@ -62,6 +62,14 @@ class _Research:
             "audit_trace_url": "/trace/secret",
             "retrieved_papers": [{"pmid": "12345", "title": "Trial", "rrf_score": 0.9, "abstract": "Safe abstract"}],
             "raw_prompt": "secret prompt", "model_output": "internal completion", "internal_trace": {"secret": True},
+            "query_plan": {
+                "canonical_query": "diabetes mellitus", "mesh_terms": ["Diabetes Mellitus"],
+                "pico": {"population": "Adults", "intervention": None, "comparator": None, "outcome": None},
+                "route": "MODERATE", "router_confidence": 0.91, "router_reasoning": "private",
+                "subqueries": ["unsafe raw query"],
+            },
+            "research_plan": {"subquestions": [{"id": "sq-1", "question": "Assess outcomes", "dependencies": [], "concepts": ["outcomes"]}]},
+            "coverage_statuses": {"sq-1": "COVERED"},
         }
 
     def get_trace(self, request_id):
@@ -101,6 +109,13 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     public = json.loads(turn["public_response_json"])
     assert public["evidence_table"][0]["supporting_text_spans"] == ["Exact span"]
     assert public["evidence_table"][0]["retrieval_channels"] == ["bm25"]
+    assert public["interpretation"] == {
+        "canonical_question": "diabetes mellitus",
+        "pico": {"population": "Adults", "intervention": None, "comparator": None, "outcome": None},
+        "mesh_concepts": ["Diabetes Mellitus"], "route": "MODERATE",
+        "subquestions": [{"id": "sq-1", "question": "Assess outcomes"}],
+        "coverage_statuses": [{"subquestion_id": "sq-1", "status": "COVERED"}],
+    }
     assert public["evidence_table"][0]["subquestion_ids"] == ["sq-1"]
     assert not {
         "retrieval_provenance", "reranker_score", "reranker_mode"
@@ -118,6 +133,7 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert "rrf_score" not in restored_json["retrieved_papers"][0]
     assert "admin_only" not in restored_json["evidence_table"][0]
     assert restored_json["evidence_table"][0]["retrieval_channels"] == ["bm25"]
+    assert restored_json["interpretation"] == public["interpretation"]
     assert not {"request_id", "raw_prompt", "internal_trace", "audit_trace_url"} & restored_json.keys()
 
 
