@@ -79,8 +79,370 @@
     "29191630",
     "29193402"
   ],
-  "fetched_at": "2026-09-30T04:34:32.474256+00:00",
+  "fetched_at": "2026-09-30T04:54:07.179944+00:00",
   "label_count": 40,
+  "label_evidence": {
+    "aa_amyloidosis_renal_survival:29173691": {
+      "benchmark_title": "Clinical outcomes and survival in AA amyloidosis patients.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Clinical outcomes and survival in AA amyloidosis patients.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29173691",
+      "source_title": "Clinical outcomes and survival in AA amyloidosis patients.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29173691/"
+    },
+    "activity_type1_ckd_mortality:29038314": {
+      "benchmark_title": "Physical Activity Reduces Risk of Premature Mortality in Patients With Type 1 Diabetes With and Without Kidney Disease.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Physical Activity Reduces Risk of Premature Mortality in Patients With Type 1 Diabetes With and Without Kidney Disease.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29038314",
+      "source_title": "Physical Activity Reduces Risk of Premature Mortality in Patients With Type 1 Diabetes With and Without Kidney Disease.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29038314/"
+    },
+    "adenine_ckd_rat_model:29030945": {
+      "benchmark_title": "Adenine-induced chronic kidney disease in rats.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Adenine-induced chronic kidney disease in rats.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29030945",
+      "source_title": "Adenine-induced chronic kidney disease in rats.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29030945/"
+    },
+    "adpkd_india_clinical_profile:28098112": {
+      "benchmark_title": "Autosomal dominant polycystic kidney disease: Study of clinical characteristics in an Indian population.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Autosomal dominant polycystic kidney disease: Study of clinical characteristics in an Indian population.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28098112",
+      "source_title": "Autosomal dominant polycystic kidney disease: Study of clinical characteristics in an Indian population.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28098112/"
+    },
+    "aki_elderly_prognosis:29169177": {
+      "benchmark_title": "Acute Kidney Injury in Elderly Population: A Prospective Observational Study.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Acute Kidney Injury in Elderly Population: A Prospective Observational Study.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29169177",
+      "source_title": "Acute Kidney Injury in Elderly Population: A Prospective Observational Study.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29169177/"
+    },
+    "aki_long_term_consequences:29056166": {
+      "benchmark_title": "Long-term Adverse Events Associated With Acute Kidney Injury.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Long-term Adverse Events Associated With Acute Kidney Injury.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29056166",
+      "source_title": "Long-term Adverse Events Associated With Acute Kidney Injury.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29056166/"
+    },
+    "ala_nrf2_rhabdo_aki:29068550": {
+      "benchmark_title": "5-Aminolevulinic acid exerts renoprotective effect via Nrf2 activation in murine rhabdomyolysis-induced acute kidney injury.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "5-Aminolevulinic acid exerts renoprotective effect via Nrf2 activation in murine rhabdomyolysis-induced acute kidney injury.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29068550",
+      "source_title": "5-Aminolevulinic acid exerts renoprotective effect via Nrf2 activation in murine rhabdomyolysis-induced acute kidney injury.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29068550/"
+    },
+    "bivalirudin_ckd_cad:29191630": {
+      "benchmark_title": "Efficacy and safety of bivalirudin in coronary artery disease patients with mild to moderate chronic kidney disease: Meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Efficacy and safety of bivalirudin in coronary artery disease patients with mild to moderate chronic kidney disease: Meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29191630",
+      "source_title": "Efficacy and safety of bivalirudin in coronary artery disease patients with mild to moderate chronic kidney disease: Meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29191630/"
+    },
+    "bp_guidelines_cvd:29084083": {
+      "benchmark_title": "Incidence of cardiovascular disease in individuals affected by recent changes to US blood pressure treatment guidelines.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Incidence of cardiovascular disease in individuals affected by recent changes to US blood pressure treatment guidelines.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29084083",
+      "source_title": "Incidence of cardiovascular disease in individuals affected by recent changes to US blood pressure treatment guidelines.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29084083/"
+    },
+    "bp_target_ckd_stroke:29036427": {
+      "benchmark_title": "Impact of achieved blood pressure on renal function decline and first stroke in hypertensive patients with chronic kidney disease.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Impact of achieved blood pressure on renal function decline and first stroke in hypertensive patients with chronic kidney disease.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29036427",
+      "source_title": "Impact of achieved blood pressure on renal function decline and first stroke in hypertensive patients with chronic kidney disease.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29036427/"
+    },
+    "canagliflozin_special_populations:26084476": {
+      "benchmark_title": "A Systematic Review on Effect of Canagliflozin in Special Population.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "A Systematic Review on Effect of Canagliflozin in Special Population.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "26084476",
+      "source_title": "A Systematic Review on Effect of Canagliflozin in Special Population.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/26084476/"
+    },
+    "ckd_dysglycemia_origin:28842165": {
+      "benchmark_title": "Chronic Kidney Disease, Basal Insulin Glargine, and Health Outcomes in People with Dysglycemia: The ORIGIN Study.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Chronic Kidney Disease, Basal Insulin Glargine, and Health Outcomes in People with Dysglycemia: The ORIGIN Study.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28842165",
+      "source_title": "Chronic Kidney Disease, Basal Insulin Glargine, and Health Outcomes in People with Dysglycemia: The ORIGIN Study.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28842165/"
+    },
+    "ckd_hyperkalemia_cohort:29177463": {
+      "benchmark_title": "Elevated potassium levels in patients with chronic kidney disease: occurrence, risk factors and clinical outcomes-a Danish population-based cohort study.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Elevated potassium levels in patients with chronic kidney disease: occurrence, risk factors and clinical outcomes-a Danish population-based cohort study.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29177463",
+      "source_title": "Elevated potassium levels in patients with chronic kidney disease: occurrence, risk factors and clinical outcomes-a Danish population-based cohort study.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29177463/"
+    },
+    "ckd_mbd_hemodialysis_mortality:29161692": {
+      "benchmark_title": "Association between Extreme Values of Markers of Chronic Kidney Disease: Mineral and Bone Disorder and 5-Year Mortality among Prevalent Hemodialysis Patients.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Association between Extreme Values of Markers of Chronic Kidney Disease: Mineral and Bone Disorder and 5-Year Mortality among Prevalent Hemodialysis Patients.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29161692",
+      "source_title": "Association between Extreme Values of Markers of Chronic Kidney Disease: Mineral and Bone Disorder and 5-Year Mortality among Prevalent Hemodialysis Patients.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29161692/"
+    },
+    "contrast_aki_coronary:28941604": {
+      "benchmark_title": "Current Risk of Contrast-Induced Acute Kidney Injury After Coronary Angiography and Intervention: A Reappraisal of the Literature.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Current Risk of Contrast-Induced Acute Kidney Injury After Coronary Angiography and Intervention: A Reappraisal of the Literature.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28941604",
+      "source_title": "Current Risk of Contrast-Induced Acute Kidney Injury After Coronary Angiography and Intervention: A Reappraisal of the Literature.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28941604/"
+    },
+    "dapagliflozin_fsgs:29141939": {
+      "benchmark_title": "Dapagliflozin in focal segmental glomerulosclerosis: a combined human-rodent pilot study.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Dapagliflozin in focal segmental glomerulosclerosis: a combined human-rodent pilot study.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29141939",
+      "source_title": "Dapagliflozin in focal segmental glomerulosclerosis: a combined human-rodent pilot study.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29141939/"
+    },
+    "endothelial_ckd_consensus:29135628": {
+      "benchmark_title": "Endothelial factors in the pathogenesis and treatment of chronic kidney disease Part II: Role in disease conditions: a joint consensus statement from the European Society of Hypertension Working Group on Endothelin and Endothelial Factors and the Japanese Society of Hypertension.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Endothelial factors in the pathogenesis and treatment of chronic kidney disease Part II: Role in disease conditions: a joint consensus statement from the European Society of Hypertension Working Group on Endothelin and Endothelial Factors and the Japanese Society of Hypertension.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29135628",
+      "source_title": "Endothelial factors in the pathogenesis and treatment of chronic kidney disease Part II: Role in disease conditions: a joint consensus statement from the European Society of Hypertension Working Group on Endothelin and Endothelial Factors and the Japanese Society of Hypertension.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29135628/"
+    },
+    "esa_renoprotection_meta:28077085": {
+      "benchmark_title": "Erythropoiesis stimulating agents and reno-protection: a meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Erythropoiesis stimulating agents and reno-protection: a meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28077085",
+      "source_title": "Erythropoiesis stimulating agents and reno-protection: a meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28077085/"
+    },
+    "ferric_citrate_fg23_ckd:29181658": {
+      "benchmark_title": "Effect of ferric citrate hydrate on FGF23 and PTH levels in patients with non-dialysis-dependent chronic kidney disease with normophosphatemia and iron deficiency.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Effect of ferric citrate hydrate on FGF23 and PTH levels in patients with non-dialysis-dependent chronic kidney disease with normophosphatemia and iron deficiency.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29181658",
+      "source_title": "Effect of ferric citrate hydrate on FGF23 and PTH levels in patients with non-dialysis-dependent chronic kidney disease with normophosphatemia and iron deficiency.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29181658/"
+    },
+    "genetic_predictors_t2d_ckd:26806836": {
+      "benchmark_title": "Genetic and clinical variables identify predictors for chronic kidney disease in type 2 diabetes.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Genetic and clinical variables identify predictors for chronic kidney disease in type 2 diabetes.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "26806836",
+      "source_title": "Genetic and clinical variables identify predictors for chronic kidney disease in type 2 diabetes.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/26806836/"
+    },
+    "hepatitis_b_ckd_meta:28051791": {
+      "benchmark_title": "Association between hepatitis B virus and chronic kidney disease: a systematic review and meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Association between hepatitis B virus and chronic kidney disease: a systematic review and meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28051791",
+      "source_title": "Association between hepatitis B virus and chronic kidney disease: a systematic review and meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28051791/"
+    },
+    "hif_phd_inhibitors_anemia:28651951": {
+      "benchmark_title": "Prolyl hydroxylase domain inhibitors as a novel therapeutic approach against anemia in chronic kidney disease.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Prolyl hydroxylase domain inhibitors as a novel therapeutic approach against anemia in chronic kidney disease.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28651951",
+      "source_title": "Prolyl hydroxylase domain inhibitors as a novel therapeutic approach against anemia in chronic kidney disease.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28651951/"
+    },
+    "ipsc_epo_renal_anemia:28954928": {
+      "benchmark_title": "Human pluripotent stem cell-derived erythropoietin-producing cells ameliorate renal anemia in mice.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Human pluripotent stem cell-derived erythropoietin-producing cells ameliorate renal anemia in mice.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28954928",
+      "source_title": "Human pluripotent stem cell-derived erythropoietin-producing cells ameliorate renal anemia in mice.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28954928/"
+    },
+    "kidney_stones_ckd_risk:27837248": {
+      "benchmark_title": "Nephrolithiasis as a risk factor of chronic kidney disease: a meta-analysis of cohort studies with 4,770,691 participants.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Nephrolithiasis as a risk factor of chronic kidney disease: a meta-analysis of cohort studies with 4,770,691 participants.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "27837248",
+      "source_title": "Nephrolithiasis as a risk factor of chronic kidney disease: a meta-analysis of cohort studies with 4,770,691 participants.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/27837248/"
+    },
+    "lupus_nephritis_induction:25550339": {
+      "benchmark_title": "Tacrolimus versus mycophenolate mofetil for induction therapy of lupus nephritis: a randomised controlled trial and long-term follow-up.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Tacrolimus versus mycophenolate mofetil for induction therapy of lupus nephritis: a randomised controlled trial and long-term follow-up.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "25550339",
+      "source_title": "Tacrolimus versus mycophenolate mofetil for induction therapy of lupus nephritis: a randomised controlled trial and long-term follow-up.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/25550339/"
+    },
+    "neuropathy_screen_cv_risk:29098323": {
+      "benchmark_title": "Three-question set from Michigan Neuropathy Screening Instrument adds independent prognostic information on cardiovascular outcomes: analysis of ALTITUDE trial.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Three-question set from Michigan Neuropathy Screening Instrument adds independent prognostic information on cardiovascular outcomes: analysis of ALTITUDE trial.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29098323",
+      "source_title": "Three-question set from Michigan Neuropathy Screening Instrument adds independent prognostic information on cardiovascular outcomes: analysis of ALTITUDE trial.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29098323/"
+    },
+    "nsaid_aki_ckd_risk:28764659": {
+      "benchmark_title": "Non-steroidal anti-inflammatory drug induced acute kidney injury in the community dwelling general population and people with chronic kidney disease: systematic review and meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Non-steroidal anti-inflammatory drug induced acute kidney injury in the community dwelling general population and people with chronic kidney disease: systematic review and meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28764659",
+      "source_title": "Non-steroidal anti-inflammatory drug induced acute kidney injury in the community dwelling general population and people with chronic kidney disease: systematic review and meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28764659/"
+    },
+    "oral_iron_find_ckd:29092739": {
+      "benchmark_title": "Erythropoietic response to oral iron in patients with nondialysis-dependent chronic kidney disease in the FIND-CKD trial.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Erythropoietic response to oral iron in patients with nondialysis-dependent chronic kidney disease in the FIND-CKD trial .",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29092739",
+      "source_title": "Erythropoietic response to oral iron in patients with nondialysis-dependent chronic kidney disease in the FIND-CKD trial.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29092739/"
+    },
+    "paricalcitol_ckd_cvd:28835982": {
+      "benchmark_title": "Effects of paricalcitol on cardiovascular outcomes and renal function in patients with chronic kidney disease : A meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Effects of paricalcitol on cardiovascular outcomes and renal function in patients with chronic kidney disease : A meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28835982",
+      "source_title": "Effects of paricalcitol on cardiovascular outcomes and renal function in patients with chronic kidney disease : A meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28835982/"
+    },
+    "pediatric_ckd_adiposity:29173296": {
+      "benchmark_title": "Waist Circumference and Body Mass Index in Children with Chronic Kidney Disease and Metabolic, Cardiovascular, and Renal Outcomes.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Waist Circumference and Body Mass Index in Children with Chronic Kidney Disease and Metabolic, Cardiovascular, and Renal Outcomes.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29173296",
+      "source_title": "Waist Circumference and Body Mass Index in Children with Chronic Kidney Disease and Metabolic, Cardiovascular, and Renal Outcomes.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29173296/"
+    },
+    "pediatric_dialysis_hydration:29136192": {
+      "benchmark_title": "Assessing the hydration status of children with chronic kidney disease and on dialysis: a comparison of techniques.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Assessing the hydration status of children with chronic kidney disease and on dialysis: a comparison of techniques.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29136192",
+      "source_title": "Assessing the hydration status of children with chronic kidney disease and on dialysis: a comparison of techniques.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29136192/"
+    },
+    "raas_advanced_ckd_diabetes:29106631": {
+      "benchmark_title": "Effect of renin-angiotensin-aldosterone system blockade in adults with diabetes mellitus and advanced chronic kidney disease not on dialysis: a systematic review and meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Effect of renin-angiotensin-aldosterone system blockade in adults with diabetes mellitus and advanced chronic kidney disease not on dialysis: a systematic review and meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29106631",
+      "source_title": "Effect of renin-angiotensin-aldosterone system blockade in adults with diabetes mellitus and advanced chronic kidney disease not on dialysis: a systematic review and meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29106631/"
+    },
+    "recurrent_glomerular_transplant:28832357": {
+      "benchmark_title": "Recurrent glomerular disease after kidney transplantation.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Recurrent glomerular disease after kidney transplantation.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28832357",
+      "source_title": "Recurrent glomerular disease after kidney transplantation.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28832357/"
+    },
+    "renal_anemia_overview:29087100": {
+      "benchmark_title": "[ANEMIA IN CHRONIC KIDNEY DISEASE].",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "[ANEMIA IN CHRONIC KIDNEY DISEASE].",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29087100",
+      "source_title": "[ANEMIA IN CHRONIC KIDNEY DISEASE].",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29087100/"
+    },
+    "t2d_residual_cardiorenal_biomarkers:29164839": {
+      "benchmark_title": "Residual renal and cardiovascular disease risk in conventionally-treated patients with type 2 diabetes: the potential of non-traditional biomarkers.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Residual renal and cardiovascular disease risk in conventionally-treated patients with type 2 diabetes: the potential of non-traditional biomarkers.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29164839",
+      "source_title": "Residual renal and cardiovascular disease risk in conventionally-treated patients with type 2 diabetes: the potential of non-traditional biomarkers.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29164839/"
+    },
+    "telehealth_ckd_bp:29172929": {
+      "benchmark_title": "Telehealth for the management of blood pressure in patients with chronic kidney disease: A systematic review.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Telehealth for the management of blood pressure in patients with chronic kidney disease: A systematic review.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29172929",
+      "source_title": "Telehealth for the management of blood pressure in patients with chronic kidney disease: A systematic review.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29172929/"
+    },
+    "transplant_biomarkers_graft:29189482": {
+      "benchmark_title": "Analysis of Biomarkers Within the Initial 2 Years Posttransplant and 5-Year Kidney Transplant Outcomes: Results From Clinical Trials in Organ Transplantation-17.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Analysis of Biomarkers Within the Initial 2 Years Posttransplant and 5-Year Kidney Transplant Outcomes: Results From Clinical Trials in Organ Transplantation-17.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29189482",
+      "source_title": "Analysis of Biomarkers Within the Initial 2 Years Posttransplant and 5-Year Kidney Transplant Outcomes: Results From Clinical Trials in Organ Transplantation-17.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29189482/"
+    },
+    "transplant_cognition_meta:28992229": {
+      "benchmark_title": "Meta-analysis of cognitive functioning in patients following kidney transplantation.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Meta-analysis of cognitive functioning in patients following kidney transplantation.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "28992229",
+      "source_title": "Meta-analysis of cognitive functioning in patients following kidney transplantation.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28992229/"
+    },
+    "tripterygium_ckd_review:29193402": {
+      "benchmark_title": "Efficacy and safety of Tripterygium wilfordii Hook F for CKD in Mainland China: A systematic review and meta-analysis.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Efficacy and safety of Tripterygium wilfordii Hook F for CKD in Mainland China: A systematic review and meta-analysis.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29193402",
+      "source_title": "Efficacy and safety of Tripterygium wilfordii Hook F for CKD in Mainland China: A systematic review and meta-analysis.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29193402/"
+    },
+    "urate_lowering_ckd_progression:29084343": {
+      "benchmark_title": "Uric acid lowering therapies for preventing or delaying the progression of chronic kidney disease.",
+      "checked_at": "2026-09-30T00:00:00+00:00",
+      "corpus_title": "Uric acid lowering therapies for preventing or delaying the progression of chronic kidney disease.",
+      "method": "official_pubmed_page_title_check",
+      "pmid": "29084343",
+      "source_title": "Uric acid lowering therapies for preventing or delaying the progression of chronic kidney disease.",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29084343/"
+    }
+  },
   "label_status": {
     "aa_amyloidosis_renal_survival:29173691": "web_source_verified_efetch_unavailable",
     "activity_type1_ckd_mortality:29038314": "web_source_verified_efetch_unavailable",
@@ -131,6 +493,10 @@
     "SIMPLE"
   ],
   "source": "web-assisted benchmark adjudication against official NCBI PubMed record pages",
+  "source_verification_artifact": "data\\evaluation\\benchmark_v2_source_verification.json",
+  "source_verification_checksum": "9bafb2ec79aaa810490f7939396f7676f914be43c827dbc064c2f7b4c833246f",
+  "source_verification_error": null,
+  "source_verification_status": "valid",
   "study_types": [
     "Clinical Trial",
     "Meta-Analysis",
@@ -143,7 +509,7 @@
   "unverified_labels": 0,
   "valid": true,
   "validation_errors": [],
-  "validation_method": "NCBI EFetch was attempted; source-linked labels were independently web-assisted checked against official PubMed pages and exact active-corpus PMIDs/titles.",
+  "validation_method": "NCBI EFetch was attempted; labels are verified only where a checksum-bound official PubMed page title check matches the benchmark and exact active-corpus title.",
   "validation_status": "valid_with_efetch_unavailable",
   "verified_labels": 40,
   "web_source_verified_labels": 40

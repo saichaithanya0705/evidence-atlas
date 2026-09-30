@@ -206,18 +206,103 @@ def test_missing_pubmed_record_is_reported_as_unverified_label():
 
     result = adjudicate_records(_dataset(), {})
     assert result.unverified_labels == 1
-    assert result.label_status["q1:100"] == "missing_record"
+    assert result.label_status["q1:100"] == "missing_source_verification_evidence"
 
 
-def test_offline_efetch_can_preserve_a_source_linked_web_adjudication():
+def _source_verification(*, source_title="Verified title", source_url="https://pubmed.ncbi.nlm.nih.gov/100/"):
+    return {
+        "q1:100": {
+            "pmid": "100",
+            "source_title": source_title,
+            "method": "official_pubmed_page_title_check",
+            "checked_at": "2026-09-30T00:00:00+00:00",
+            "source_url": source_url,
+        }
+    }
+
+
+def test_efetch_failure_cannot_verify_from_forged_direct_title_match_alone():
     from evaluation.adjudication import adjudicate_records
 
-    result = adjudicate_records(_dataset(), {}, {"100"}, allow_web_source_fallback=True)
-    assert result.verified_labels == 1
-    assert result.unverified_labels == 0
-    assert result.web_source_verified_labels == 1
-    assert result.live_efetch_verified_labels == 0
-    assert result.label_status["q1:100"] == "web_source_verified_efetch_unavailable"
+    result = adjudicate_records(_dataset(), {}, {"100"})
+    assert result.verified_labels == 0
+    assert result.unverified_labels == 1
+    assert result.web_source_verified_labels == 0
+    assert result.label_status["q1:100"] == "missing_source_verification_evidence"
+
+
+def test_efetch_failure_with_absent_source_verification_evidence_is_unverified():
+    from evaluation.adjudication import adjudicate_records
+
+    result = adjudicate_records(_dataset(), {}, {"100"}, corpus_titles={"100": "Verified title"})
+    assert result.verified_labels == 0
+    assert result.label_status["q1:100"] == "missing_source_verification_evidence"
+
+
+def test_efetch_failure_rejects_source_url_for_a_different_pmid():
+    from evaluation.adjudication import adjudicate_records
+
+    result = adjudicate_records(
+        _dataset(), {}, {"100"}, source_verification=_source_verification(source_url="https://pubmed.ncbi.nlm.nih.gov/101/"),
+        corpus_titles={"100": "Verified title"},
+    )
+    assert result.verified_labels == 0
+    assert result.label_status["q1:100"] == "source_url_pmid_mismatch"
+
+
+def test_efetch_failure_rejects_source_title_mismatch():
+    from evaluation.adjudication import adjudicate_records
+
+    result = adjudicate_records(
+        _dataset(), {}, {"100"}, source_verification=_source_verification(source_title="A forged title"),
+        corpus_titles={"100": "Verified title"},
+    )
+    assert result.verified_labels == 0
+    assert result.label_status["q1:100"] == "source_title_mismatch"
+
+
+def test_efetch_failure_requires_corpus_title_to_match_source_and_benchmark():
+    from evaluation.adjudication import adjudicate_records
+
+    result = adjudicate_records(
+        _dataset(), {}, {"100"}, source_verification=_source_verification(),
+        corpus_titles={"100": "Different local title"},
+    )
+    assert result.verified_labels == 0
+    assert result.label_status["q1:100"] == "corpus_title_mismatch"
+
+
+def test_source_verification_artifact_checksum_and_schema_are_required(tmp_path):
+    from evaluation.adjudication import load_source_verification
+    from evaluation.benchmark import stable_checksum
+
+    benchmark_path = tmp_path / "benchmark.json"
+    benchmark_path.write_text(json.dumps(_dataset([_entry()]).model_dump(mode="json")), encoding="utf-8")
+    payload = {
+        "version": "1.0",
+        "benchmark_checksum": hashlib.sha256(benchmark_path.read_bytes()).hexdigest(),
+        "records": [{
+            "entry_id": "q1", "pmid": "100", "source_title": "Verified title",
+            "method": "official_pubmed_page_title_check", "checked_at": "2026-09-30T00:00:00+00:00",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/100/",
+        }],
+    }
+    payload["verification_checksum"] = stable_checksum(payload)
+    artifact_path = tmp_path / "verification.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert load_source_verification(artifact_path, benchmark_path)["q1:100"]["source_title"] == "Verified title"
+
+    payload["benchmark_checksum"] = "0" * 64
+    payload["verification_checksum"] = stable_checksum({key: value for key, value in payload.items() if key != "verification_checksum"})
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="checksum"):
+        load_source_verification(artifact_path, benchmark_path)
+
+    payload["benchmark_checksum"] = hashlib.sha256(benchmark_path.read_bytes()).hexdigest()
+    payload["records"][0]["source_title"] = "Tampered after checksum"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact checksum"):
+        load_source_verification(artifact_path, benchmark_path)
 
 
 def test_partial_network_failures_retry_only_with_a_bounded_attempt_count(tmp_path):

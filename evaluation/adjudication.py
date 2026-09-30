@@ -11,7 +11,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -37,6 +37,7 @@ class AdjudicationResult:
     failed_pmids: list[str]
     live_efetch_verified_labels: int = 0
     web_source_verified_labels: int = 0
+    label_evidence: dict[str, dict[str, str]] | None = None
 
 
 class PubMedClient:
@@ -166,44 +167,133 @@ def _normalized_title(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", title.casefold())
 
 
+def load_source_verification(artifact_path: str | Path, benchmark_path: str | Path) -> dict[str, dict[str, str]]:
+    """Load independently checked PubMed page titles bound to exact benchmark bytes."""
+    from evaluation.benchmark import file_checksum, load_benchmark, stable_checksum
+
+    payload = json.loads(Path(artifact_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("version") != "1.0":
+        raise ValueError("source verification artifact must have version 1.0")
+    if payload.get("benchmark_checksum") != file_checksum(benchmark_path):
+        raise ValueError("source verification artifact benchmark checksum mismatch")
+    artifact_checksum = payload.get("verification_checksum")
+    unsigned_payload = {key: value for key, value in payload.items() if key != "verification_checksum"}
+    if not isinstance(artifact_checksum, str) or artifact_checksum != stable_checksum(unsigned_payload):
+        raise ValueError("source verification artifact checksum mismatch")
+    dataset = load_benchmark(benchmark_path)
+    expected = {
+        f"{entry.id}:{judgment.pmid}": (entry.id, judgment.pmid)
+        for entry in dataset.entries for judgment in entry.judgments
+    }
+    rows = payload.get("records")
+    if not isinstance(rows, list):
+        raise ValueError("source verification artifact records must be a list")
+    checked: dict[str, dict[str, str]] = {}
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("source verification record must be an object")
+        entry_id, pmid = row.get("entry_id"), str(row.get("pmid", ""))
+        key = f"{entry_id}:{pmid}"
+        if key not in expected or expected[key] != (entry_id, pmid) or key in checked:
+            raise ValueError("source verification contains unknown or duplicate label")
+        required = ("source_title", "method", "checked_at", "source_url")
+        if any(not isinstance(row.get(field), str) or not row[field].strip() for field in required):
+            raise ValueError("source verification record has missing evidence fields")
+        if row["method"] != "official_pubmed_page_title_check":
+            raise ValueError("unsupported source verification method")
+        if row["source_url"] != f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/":
+            raise ValueError("source verification URL/PMID mismatch")
+        try:
+            timestamp = datetime.fromisoformat(row["checked_at"].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("invalid source verification checked_at") from exc
+        if timestamp.tzinfo is None or timestamp > now or now - timestamp > timedelta(days=180):
+            raise ValueError("source verification timestamp is missing timezone, future, or stale")
+        checked[key] = {field: str(row[field]) for field in required}
+        checked[key]["pmid"] = pmid
+    if set(checked) != set(expected):
+        raise ValueError("source verification artifact does not cover every benchmark label")
+    return checked
+
+
 def adjudicate_records(
     dataset,
     records: dict[str, dict[str, str] | str],
     failed_pmids: Iterable[str] = (),
     *,
-    allow_web_source_fallback: bool = False,
+    source_verification: dict[str, dict[str, str]] | None = None,
+    corpus_titles: dict[str, str] | None = None,
 ) -> AdjudicationResult:
     statuses: dict[str, str] = {}
     verified = 0
     web_verified = 0
     live_verified = 0
+    evidence: dict[str, dict[str, str]] = {}
+    source_verification = source_verification or {}
+    corpus_titles = corpus_titles or {}
     failed = set(failed_pmids)
     for entry in dataset.entries:
         for judgment in entry.judgments:
             key = f"{entry.id}:{judgment.pmid}"
             record = records.get(judgment.pmid)
             if record is None:
-                expected_source = f"https://pubmed.ncbi.nlm.nih.gov/{judgment.pmid}/"
-                if allow_web_source_fallback and judgment.title_match and judgment.source_url.rstrip("/") == expected_source.rstrip("/"):
-                    statuses[key] = "web_source_verified_efetch_unavailable"
-                    verified += 1
-                    web_verified += 1
+                checked = source_verification.get(key)
+                if checked is None:
+                    statuses[key] = "missing_source_verification_evidence"
                     continue
+                if checked.get("pmid") != judgment.pmid or checked.get("source_url") != f"https://pubmed.ncbi.nlm.nih.gov/{judgment.pmid}/":
+                    statuses[key] = "source_url_pmid_mismatch"
+                    continue
+                if _normalized_title(checked.get("source_title", "")) != _normalized_title(judgment.title):
+                    statuses[key] = "source_title_mismatch"
+                    continue
+                local_title = corpus_titles.get(judgment.pmid)
+                if local_title is None or _normalized_title(local_title) != _normalized_title(judgment.title):
+                    statuses[key] = "corpus_title_mismatch"
+                    continue
+                if judgment.source_url != checked["source_url"]:
+                    statuses[key] = "source_url_pmid_mismatch"
+                    continue
+                if checked.get("method") != "official_pubmed_page_title_check" or not checked.get("checked_at"):
+                    statuses[key] = "missing_source_verification_evidence"
+                    continue
+                evidence[key] = dict(checked)
+                evidence[key].update({"benchmark_title": judgment.title, "corpus_title": local_title})
+                statuses[key] = "web_source_verified_efetch_unavailable"
+                verified += 1
+                web_verified += 1
+                continue
+            if record is None:
                 statuses[key] = "fetch_failed" if judgment.pmid in failed else "missing_record"
                 continue
             live_title = record if isinstance(record, str) else record.get("title", "")
+            live_pmid = judgment.pmid if isinstance(record, str) else str(record.get("pmid", ""))
+            if live_pmid != judgment.pmid:
+                statuses[key] = "pmid_mismatch"
+                continue
             if _normalized_title(judgment.title) != _normalized_title(live_title):
                 statuses[key] = "title_mismatch"
+                continue
+            local_title = corpus_titles.get(judgment.pmid)
+            if corpus_titles and (local_title is None or _normalized_title(local_title) != _normalized_title(judgment.title)):
+                statuses[key] = "corpus_title_mismatch"
                 continue
             statuses[key] = "verified"
             verified += 1
             live_verified += 1
-    return AdjudicationResult(statuses, verified, len(statuses) - verified, sorted(failed), live_verified, web_verified)
+            evidence[key] = {"method": "ncbi_efetch_title_check", "pmid": judgment.pmid, "source_title": live_title}
+    return AdjudicationResult(statuses, verified, len(statuses) - verified, sorted(failed), live_verified, web_verified, evidence)
 
 
 def load_corpus_pmids(corpus_path: str | Path) -> set[str]:
     frame = pd.read_parquet(corpus_path, columns=["pmid"])
     return {str(value) for value in frame["pmid"].dropna().tolist()}
+
+
+def load_corpus_titles(corpus_path: str | Path) -> dict[str, str]:
+    frame = pd.read_parquet(corpus_path, columns=["pmid", "title"])
+    return {str(row.pmid): str(row.title) for row in frame.dropna(subset=["pmid", "title"]).itertuples(index=False)}
 
 
 def atomic_write_json(path: str | Path, payload: dict) -> None:
@@ -223,16 +313,27 @@ def atomic_write_json(path: str | Path, payload: dict) -> None:
             os.unlink(temp_name)
 
 
-def validate_live(benchmark_path: Path, corpus_path: Path, output_path: Path) -> dict:
+def validate_live(benchmark_path: Path, corpus_path: Path, output_path: Path, source_verification_path: Path | None = None) -> dict:
     from evaluation.benchmark import file_checksum, load_benchmark, validate_benchmark
 
     dataset = load_benchmark(benchmark_path)
     corpus_pmids = load_corpus_pmids(corpus_path)
+    corpus_titles = load_corpus_titles(corpus_path)
     structural = validate_benchmark(dataset, corpus_pmids)
     all_pmids = sorted({judgment.pmid for entry in dataset.entries for judgment in entry.judgments})
     client = PubMedClient(api_key=os.environ.get("NCBI_API_KEY") or None, email=os.environ.get("NCBI_EMAIL") or None)
     fetch = client.fetch_records_partial(all_pmids)
-    adjudication = adjudicate_records(dataset, fetch.records, fetch.failed_pmids, allow_web_source_fallback=True)
+    verification_path = source_verification_path or PROJECT_ROOT / "data" / "evaluation" / "benchmark_v2_source_verification.json"
+    source_verification_error = None
+    try:
+        source_verification = load_source_verification(verification_path, benchmark_path)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        source_verification = {}
+        source_verification_error = str(exc)
+    adjudication = adjudicate_records(
+        dataset, fetch.records, fetch.failed_pmids, source_verification=source_verification,
+        corpus_titles=corpus_titles,
+    )
     payload = {
         "benchmark_version": dataset.version,
         "query_count": structural.query_count,
@@ -247,6 +348,7 @@ def validate_live(benchmark_path: Path, corpus_path: Path, output_path: Path) ->
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": "web-assisted benchmark adjudication against official NCBI PubMed record pages",
         "label_status": adjudication.label_status,
+        "label_evidence": adjudication.label_evidence,
         "verified_labels": adjudication.verified_labels,
         "unverified_labels": adjudication.unverified_labels,
         "failed_pmids": adjudication.failed_pmids,
@@ -254,10 +356,14 @@ def validate_live(benchmark_path: Path, corpus_path: Path, output_path: Path) ->
         "efetch_failure_reasons": fetch.failure_reasons,
         "live_efetch_verified_labels": adjudication.live_efetch_verified_labels,
         "web_source_verified_labels": adjudication.web_source_verified_labels,
+        "source_verification_status": "valid" if source_verification_error is None else "invalid_or_missing",
+        "source_verification_error": source_verification_error,
+        "source_verification_artifact": str(verification_path),
+        "source_verification_checksum": file_checksum(verification_path) if source_verification_error is None else None,
         "validation_method": (
             "Live NCBI EFetch records verified against PubMed labels."
             if not fetch.failed_pmids
-            else "NCBI EFetch was attempted; source-linked labels were independently web-assisted checked against official PubMed pages and exact active-corpus PMIDs/titles."
+            else "NCBI EFetch was attempted; labels are verified only where a checksum-bound official PubMed page title check matches the benchmark and exact active-corpus title."
         ),
         "validation_errors": structural.errors,
     }
@@ -276,9 +382,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--benchmark", type=Path, required=True)
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-verification", type=Path)
     args = parser.parse_args(argv)
     try:
-        report = validate_live(args.benchmark, args.corpus, args.output)
+        report = validate_live(args.benchmark, args.corpus, args.output, args.source_verification)
     except (OSError, ValueError, KeyError, ET.ParseError) as exc:
         parser.error(str(exc))
     print(json.dumps({key: report[key] for key in ("valid", "query_count", "label_count", "corpus_record_count", "verified_labels", "unverified_labels")}, sort_keys=True))
