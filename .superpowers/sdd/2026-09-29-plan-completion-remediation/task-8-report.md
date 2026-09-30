@@ -64,3 +64,13 @@ Connected `evaluate_saved_variants` to the robustness helper through an explicit
 The new runner regression tests first failed: both stale-identity fixtures reached report generation instead of being rejected, and the runner did not accept or persist a robustness callback. They pass after the changes. The matching-artifact path also exposed a JSON/Markdown comparison bug for compound metric values after sorted JSON serialization; a regression now verifies consistent canonical display across that round-trip.
 
 Post-review verification: focused Task 8 and runner tests `20 passed`; full backend suite `1090 passed, 1 skipped, 9 warnings`. The warnings remain the FastAPI lifecycle deprecations and local Qdrant advisories noted above. The RAGAS import smoke limitation is unchanged.
+
+## Review fixes (default robustness execution)
+
+The normal saved-artifact runner now supplies a built-in deterministic robustness evaluator when no callback is injected. It measures query/context term coverage, relevance of context PMIDs, and candidate filter compliance from the saved artifact metadata. Each of the seven perturbations is applied to those inputs, then rescored; scenario provenance and computed metric deltas are persisted in the report and per-query artifact. These are artifact-based robustness checks and do not claim a fresh production retrieval or model inference run. An injected callback can still replace the evaluator when a caller has live rerun capability.
+
+Robustness evaluation now fails closed if the baseline or any scenario has no numeric metrics, or if a scenario produces no comparable metric deltas. The runner records that metric as `failed` with a concise reason and null value; it does not publish empty results as `completed`.
+
+TDD evidence for this review: the no-callback runner regression initially failed because no per-query robustness section was written, and the empty-metrics callback incorrectly reported `completed`. After wiring the default evaluator and rejecting empty deltas, the default path persisted all seven scenarios with nonempty deltas and the empty-metrics case reported `failed`. The filter-pressure fixture asserts a computed negative filter-compliance delta.
+
+Verification after this review: focused Task 8 and runner tests `21 passed`; full backend suite `1091 passed, 1 skipped, 9 warnings`.

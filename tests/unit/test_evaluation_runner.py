@@ -36,7 +36,7 @@ def _runner_fixture(tmp_path, *, benchmark_version="2.0", artifact_version="2.0"
         query_id="q1", query="Does aspirin prevent stroke?", expected_route="SIMPLE",
         variant="dense_only", configuration_hash="d" * 64,
         metadata_filters={"study_types": ["trial"]}, top_k=5,
-        candidate_pmids=["100"], candidates=[{"pmid": "100", "abstract": "Aspirin stroke evidence."}],
+        candidate_pmids=["100"], candidates=[{"pmid": "100", "abstract": "Aspirin stroke evidence.", "year": 2020, "study_type": "trial"}],
         latency_ms=15,
     )
     artifacts = tmp_path / "artifacts" / "dense_only"
@@ -61,32 +61,37 @@ def test_saved_variant_runner_rejects_artifacts_bound_to_other_benchmark_or_corp
     assert not (reports / "manifest.json").exists()
 
 
-def test_saved_variant_runner_accepts_matching_identity_and_persists_robustness_results(tmp_path):
-    from evaluation.run_evaluation import evaluate_saved_variants
+def test_saved_variant_runner_default_path_persists_all_robustness_scenarios(tmp_path):
+    from evaluation.run_evaluation import main
     from evaluation.robustness import SCENARIOS
 
-    benchmark, artifacts, reports, entry, artifact = _runner_fixture(tmp_path)
-    calls = []
-
-    def robustness_runner(current_entry, current_artifact, sample):
-        calls.append((current_entry.id, current_artifact.query_id, sample["query"]))
-        return {"relevance": 0.8 if sample["query"] == current_entry.query else 0.4}
-
-    evaluate_saved_variants(
-        benchmark, artifacts, reports, run_id="robust-run", robustness_runner=robustness_runner,
-    )
+    benchmark, artifacts, reports, _entry, _artifact = _runner_fixture(tmp_path)
+    main([
+        "--benchmark", str(benchmark), "--artifacts-dir", str(artifacts),
+        "--reports-dir", str(reports), "--run-id", "robust-run",
+    ])
     report = json.loads((reports / "robust-run" / "report.json").read_text(encoding="utf-8"))
     query = json.loads((reports / "robust-run" / "queries" / "q1.json").read_text(encoding="utf-8"))
     robustness = query["variants"]["dense_only"]["robustness"]
 
-    assert calls[0][:2] == (entry.id, artifact.query_id)
     assert set(robustness["scenarios"]) == set(SCENARIOS)
     assert all(row["provenance"]["scenario"] == name for name, row in robustness["scenarios"].items())
-    assert all("relevance" in row["metric_deltas"] for row in robustness["scenarios"].values())
+    assert all(row["metric_deltas"] for row in robustness["scenarios"].values())
+    assert robustness["scenarios"]["filter_pressure"]["metric_deltas"]["candidate_filter_compliance"] < 0
     assert report["metrics"]["dense_only.robustness"]["status"] == "completed"
     assert report["metrics"]["dense_only.robustness"]["value"]["scenario_count"] == len(SCENARIOS)
 
-    evaluate_saved_variants(benchmark, artifacts, reports, run_id="robust-not-run")
-    skipped_report = json.loads((reports / "robust-not-run" / "report.json").read_text(encoding="utf-8"))
-    assert skipped_report["metrics"]["dense_only.robustness"]["status"] == "not_run"
-    assert "callback" in skipped_report["metrics"]["dense_only.robustness"]["reason"]
+
+def test_runner_fails_closed_when_robustness_scorer_returns_empty_metrics(tmp_path):
+    from evaluation.run_evaluation import evaluate_saved_variants
+
+    benchmark, artifacts, reports, _entry, _artifact = _runner_fixture(tmp_path)
+    evaluate_saved_variants(
+        benchmark, artifacts, reports, run_id="empty-deltas",
+        robustness_runner=lambda _entry, _artifact, _sample: {},
+    )
+    report = json.loads((reports / "empty-deltas" / "report.json").read_text(encoding="utf-8"))
+    result = report["metrics"]["dense_only.robustness"]
+    assert result["status"] == "failed"
+    assert result["value"] is None
+    assert result["reason"]

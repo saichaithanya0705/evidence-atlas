@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -34,6 +35,52 @@ from evaluation.robustness import SCENARIOS, evaluate_robustness
 
 logger = logging.getLogger("evaluation")
 DEFAULT_QUERY_FILE = PROJECT_ROOT / "data" / "evaluation" / "queries.json"
+_ROBUSTNESS_STOP_WORDS = {"a", "an", "and", "are", "does", "for", "in", "is", "of", "on", "the", "to", "with"}
+
+
+def _default_robustness_scores(_entry: Any, _artifact: Any, sample: dict[str, Any]) -> dict[str, float | None]:
+    """Score perturbed saved evidence with deterministic, artifact-backed metrics."""
+    query_terms = {
+        token for token in re.findall(r"[a-z0-9]+", str(sample.get("query", "")).casefold())
+        if token not in _ROBUSTNESS_STOP_WORDS
+    }
+    context_text = " ".join(map(str, sample.get("contexts", ())))
+    context_terms = set(re.findall(r"[a-z0-9]+", context_text.casefold()))
+    query_coverage = len(query_terms & context_terms) / len(query_terms) if query_terms else None
+
+    context_pmids = sample.get("context_pmids")
+    relevant_pmids = set(map(str, sample.get("relevant_pmids", ())))
+    context_precision = (
+        sum(str(pmid) in relevant_pmids for pmid in context_pmids) / len(context_pmids)
+        if context_pmids else None
+    )
+
+    filters = sample.get("filters", {})
+    candidates = sample.get("candidate_metadata", ())
+    filter_checks: list[bool] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        year = candidate.get("year")
+        if year is not None and filters.get("year_from") is not None:
+            filter_checks.append(int(year) >= int(filters["year_from"]))
+        if year is not None and filters.get("year_to") is not None:
+            filter_checks.append(int(year) <= int(filters["year_to"]))
+        expected_types = list(filters.get("study_types") or ())
+        if filters.get("study_type"):
+            expected_types.append(filters["study_type"])
+        actual_type = str(candidate.get("study_type") or "").casefold()
+        for expected_type in expected_types:
+            expected = str(expected_type).casefold()
+            if actual_type:
+                filter_checks.append(actual_type == expected or actual_type in expected or expected in actual_type)
+
+    filter_compliance = sum(filter_checks) / len(filter_checks) if filter_checks else None
+    return {
+        "query_context_coverage": query_coverage,
+        "context_precision": context_precision,
+        "candidate_filter_compliance": filter_compliance,
+    }
 
 
 def _mean(values: list[float]) -> float | None:
@@ -224,6 +271,7 @@ def evaluate_saved_variants(
     variant_latencies: dict[str, list[float]] = {name: [] for name in active}
     robustness_results: dict[str, dict[str, Any]] = {name: {} for name in active}
     robustness_errors: dict[str, list[str]] = {name: [] for name in active}
+    effective_robustness_runner = robustness_runner or _default_robustness_scores
     corpus_pmids = set()
     try:
         from evaluation.adjudication import load_corpus_pmids
@@ -272,17 +320,24 @@ def evaluate_saved_variants(
                 "configuration_hash": artifact.configuration_hash,
                 "diagnostics": query_diagnostics,
             }
-            if robustness_runner is not None:
+            if effective_robustness_runner is not None:
                 contexts = [
                     str(candidate.get("abstract") or candidate.get("context") or candidate.get("title"))
                     for candidate in artifact.candidates
                     if isinstance(candidate, dict) and (candidate.get("abstract") or candidate.get("context") or candidate.get("title"))
                 ]
-                robustness_sample = {"query": entry.query, "contexts": contexts, "filters": artifact.metadata_filters}
+                robustness_sample = {
+                    "query": entry.query,
+                    "contexts": contexts,
+                    "filters": artifact.metadata_filters,
+                    "candidate_metadata": artifact.candidates,
+                    "context_pmids": list(artifact.candidate_pmids),
+                    "relevant_pmids": list(entry.relevant_pmids),
+                }
                 try:
                     result = evaluate_robustness(
                         robustness_sample,
-                        lambda changed: robustness_runner(entry, artifact, changed),
+                        lambda changed: effective_robustness_runner(entry, artifact, changed),
                     )
                     robustness_results[variant][entry.id] = result
                     query_details["robustness"] = result
@@ -310,7 +365,7 @@ def evaluate_saved_variants(
         metric_results[f"{variant}.citation_validity"] = {"status": "not_run", "value": None, "reason": "no complete, validated citation labels are available for every query"}
         for metric in ("faithfulness", "context_precision", "context_recall", "context_entity_recall", "answer_relevancy", "answer_correctness"):
             metric_results[f"{variant}.ragas.{metric}"] = {"status": "not_run", "value": None, "reason": "reference answer or configured RAGAS provider is unavailable"}
-        if robustness_runner is None:
+        if effective_robustness_runner is None:
             metric_results[f"{variant}.robustness"] = {"status": "not_run", "value": None, "reason": "a retrieval and metric callback for perturbed inputs was not supplied"}
         elif robustness_errors[variant]:
             metric_results[f"{variant}.robustness"] = {"status": "failed", "value": None, "reason": robustness_errors[variant][0]}
@@ -370,7 +425,10 @@ def evaluate_saved_variants(
             )
             for variant in active
         },
-        "limitations": ["Metrics reflect saved evaluation artifacts; optional provider and perturbation reruns are reported as not_run when inputs are absent."],
+        "limitations": [
+            "Robustness deltas are computed deterministically from saved candidate/context artifacts and do not rerun model inference or production retrieval.",
+            "Optional provider metrics remain not_run when references or provider credentials are unavailable.",
+        ],
     }
     return ReportStore(reports_dir).publish(run_id, report, {f"{query_id}.json": payload for query_id, payload in per_query.items()})
 
