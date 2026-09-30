@@ -53,6 +53,7 @@ export const login = (username, password) => request("/auth/login", { method: "P
 export const logout = () => request("/auth/logout", { method: "POST" });
 export const changePassword = (current_password, new_password) => request("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) });
 export const getPaper = (pmid) => request("/paper/" + encodeURIComponent(pmid));
+export const getTrace = (requestId) => request("/trace/" + encodeURIComponent(requestId));
 
 export const createConversation = () => request("/conversations", { method: "POST", body: JSON.stringify({}) });
 export const listConversations = ({ limit = 50, offset = 0 } = {}) => request("/conversations?" + new URLSearchParams({ limit, offset }));

@@ -136,6 +136,10 @@ def test_research_turn_finishes_linked_audit_before_completing_public_turn(tmp_p
     assert restored_json["evidence_table"][0]["retrieval_channels"] == ["bm25"]
     assert restored_json["interpretation"] == public["interpretation"]
     assert not {"request_id", "raw_prompt", "internal_trace", "audit_trace_url"} & restored_json.keys()
+    public_detail = service.detail(conversation["id"], account, limit=100, offset=0)
+    admin_detail = service.detail(conversation["id"], {**account, "role": "admin"}, limit=100, offset=0)
+    assert "request_id" not in public_detail.turns[0].model_dump(mode="json")
+    assert admin_detail.turns[0].model_dump(mode="json")["request_id"] == run["id"]
 
 
 def test_research_preserves_raw_message_and_passes_agent_rewrite_separately(tmp_path):

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createConversation, getConversation, listConversations, submitConversationTurn } from "../api.js";
 import ConversationHistory from "./ConversationHistory.jsx";
 import ConversationList from "./ConversationList.jsx";
@@ -49,7 +49,10 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
         }
         if (!active || generation !== loadGeneration.current) return;
         setActiveConversation(result.conversation);
-        setTurns(allTurns.sort((left, right) => left.sequence - right.sequence).map(turn => ({ ...turn, result: turn.result || turn.public_response || null })));
+        setTurns(allTurns.sort((left, right) => left.sequence - right.sequence).map(turn => {
+          const result = turn.result || turn.public_response || null;
+          return { ...turn, result: isAdmin && result && turn.request_id ? { ...result, request_id: turn.request_id } : result };
+        }));
         setDetailState({ loading: false, error: "" });
       } catch (error) { if (active && generation === loadGeneration.current) setDetailState({ loading: false, error: errorText(error) }); }
     }
@@ -58,6 +61,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   }, [conversationId]);
 
   const activeLockKey = conversationId || "__new__";
+  const activePmids = useMemo(() => evidenceWorkspace.activeTabId?.startsWith("pmid:") ? [evidenceWorkspace.activeTabId.slice(5)] : [], [evidenceWorkspace.activeTabId]);
   const submitting = submittingIds.has(activeLockKey);
   useEffect(() => { if (focusAfterResponse.current && !submitting) { responseRef.current?.focus(); focusAfterResponse.current = false; } }, [turns, submitting]);
 
@@ -134,7 +138,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     {detailState.loading && <p role="status">Loading conversation…</p>}
     {detailState.error && <p className="conversation-error" role="alert">{detailState.error}</p>}
     {!detailState.loading && !detailState.error && <>
-      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} isAdmin={isAdmin} navigate={navigate} />}
+      {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} isAdmin={isAdmin} navigate={navigate} activePmids={activePmids} />}
       {!conversationId && !showList && <p className="conversation-empty">Start with a research question. Your messages will be saved in this conversation.</p>}
       <ResearchComposer onSubmit={submit} submitting={submitting} isAdmin={isAdmin} />
       {submissionError && <p className="conversation-error" role="alert">{submissionError}</p>}

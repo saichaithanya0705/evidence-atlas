@@ -11,6 +11,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from backend.app.conversation.models import (
+    AdminConversationDetailResponse,
+    AdminConversationTurnRecord,
     ConversationCreateResponse,
     ConversationDetailResponse,
     ConversationHistoryWindow,
@@ -152,7 +154,7 @@ class ConversationService:
             "total": page["total"],
         }
 
-    def detail(self, conversation_id: str, account: dict, *, limit: int, offset: int) -> ConversationDetailResponse | None:
+    def detail(self, conversation_id: str, account: dict, *, limit: int, offset: int) -> ConversationDetailResponse | AdminConversationDetailResponse | None:
         page = self.store.detail_for_account(conversation_id, self._account_id(account), limit=limit, offset=offset)
         if page is None:
             return None
@@ -172,13 +174,18 @@ class ConversationService:
                     })
                 except (TypeError, ValueError, ValidationError):
                     result = None
-            turns.append(ConversationTurnRecord(
+            turn_fields = dict(
                 turn_id=item["id"], sequence=item["ordinal"], user_message=item["user_message"],
                 action=item["agent_action"], answer_status=item["answer_status"],
                 assistant_message=item["assistant_message"], created_at=item["created_at"], result=result,
-            ))
+            )
+            if account.get("role") == "admin":
+                turns.append(AdminConversationTurnRecord(**turn_fields, request_id=item.get("audit_run_id")))
+            else:
+                turns.append(ConversationTurnRecord(**turn_fields))
         following = offset + len(turns)
-        return ConversationDetailResponse(
+        response_type = AdminConversationDetailResponse if account.get("role") == "admin" else ConversationDetailResponse
+        return response_type(
             conversation=ConversationSummary(
                 conversation_id=conversation["id"], title=conversation["title"],
                 created_at=conversation["created_at"], updated_at=conversation["updated_at"],

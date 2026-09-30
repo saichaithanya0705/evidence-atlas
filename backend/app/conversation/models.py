@@ -155,9 +155,19 @@ class ConversationTurnRecord(_StrictModel):
     result: ConversationTurnPublicResult | None = None
 
 
+class AdminConversationTurnRecord(ConversationTurnRecord):
+    request_id: str | None = Field(default=None, max_length=100)
+
+
 class ConversationDetailResponse(_StrictModel):
     conversation: ConversationSummary
     turns: list[ConversationTurnRecord] = Field(default_factory=list, max_length=100)
+    next_cursor: str | None = Field(default=None, max_length=200)
+
+
+class AdminConversationDetailResponse(_StrictModel):
+    conversation: ConversationSummary
+    turns: list[AdminConversationTurnRecord] = Field(default_factory=list, max_length=100)
     next_cursor: str | None = Field(default=None, max_length=200)
 
 

@@ -20,6 +20,7 @@ let announceHeldTurn = () => {};
 let lastTurnBody = null;
 const conversations = new Map();
 const auditRows = [];
+const traceRequests = [];
 
 function turn(status, message) {
   const labels = { SUPPORTED: 'SUPPORTED', LIMITED: 'LIMITED', INSUFFICIENT: 'INSUFFICIENT', FAILED: 'FAILED' };
@@ -27,7 +28,7 @@ function turn(status, message) {
   const spans = [`Supporting span for ${message}`, `Second supporting span for ${message}`];
   const paper = { pmid: '12345', title: 'Illustrative research record', abstract: 'Fixture abstract with full stored text.', authors: ['Example Author', 'Second Author'], journal: 'Example Journal', year: 2024, study_type: 'Review', mesh_terms: ['Clinical Research', 'Evidence Synthesis'] };
   const secondPaper = { pmid: '67890', title: 'Second illustrative paper', abstract: 'Second full abstract text.', authors: ['Second Study Author'], journal: 'Other Journal', year: 2023, study_type: 'Trial', mesh_terms: ['Clinical Research'], detailError: true, sessionExpired: true, empty: true };
-  return { conversation_id: 'conversation-1', turn_id: `turn-${Date.now()}`, action: message === 'clarify' ? 'CLARIFY' : 'RESEARCH', answer_status: status, assistant_message: answer, cited_pmids: ['12345'], evidence_table: [{ pmid: '12345', title: paper.title, key_findings: `Finding for ${message}`, outcome: 'Clinical outcome', limitations: 'Fixture limitation', supporting_text_spans: spans }], retrieved_papers: [paper, secondPaper], evidence_gaps: status === 'INSUFFICIENT' ? ['No matching population data'] : [], consensus_level: status === 'INSUFFICIENT' ? 'insufficient' : 'consensus', progress_summary: 'Evidence review completed.', request_id: 'run-1' };
+  return { conversation_id: 'conversation-1', turn_id: `turn-${Date.now()}`, action: message === 'clarify' ? 'CLARIFY' : 'RESEARCH', answer_status: status, assistant_message: answer, cited_pmids: ['12345'], evidence_table: [{ pmid: '12345', title: paper.title, key_findings: `Finding for ${message}`, outcome: 'Clinical outcome', limitations: 'Fixture limitation', supporting_text_spans: spans, retrieval_channels: ['bm25', 'dense'], subquestion_ids: ['sq-1'] }], retrieved_papers: [paper, secondPaper], evidence_gaps: status === 'INSUFFICIENT' ? ['No matching population data'] : [], consensus_level: status === 'INSUFFICIENT' ? 'insufficient' : 'consensus', progress_summary: 'Evidence review completed.', request_id: 'run-1', interpretation: { canonical_question: `Canonical question for ${message}`, pico: { population: 'Adults with condition X', intervention: 'Treatment A', comparator: 'Usual care', outcome: 'Clinical outcome' }, mesh_concepts: ['Condition X', 'Treatment A'], route: 'MODERATE', subquestions: [{ id: 'sq-1', question: `Does Treatment A improve outcomes for ${message}?` }], coverage_statuses: [{ subquestion_id: 'sq-1', status: 'COVERED' }] }, router_confidence: 0.98, router_reasoning: 'PRIVATE ROUTER REASONING', evaluation_metrics: { precision: 0.97 }, score: 0.97, graph_path: ['PRIVATE GRAPH NODE'], internal_trace: 'PRIVATE TRACE FIELD' };
 }
 
 await page.route('**/api/**', async route => {
@@ -62,7 +63,9 @@ await page.route('**/api/**', async route => {
     const result = turn(answerStatus, body.message);
     result.conversation_id = id;
     if (record.turns.length === 0) record.conversation.title = body.message.slice(0, 80);
-    record.turns.push({ turn_id: result.turn_id, sequence: record.turns.length + 1, user_message: body.message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', public_response: { cited_pmids: result.cited_pmids, evidence_table: result.evidence_table, retrieved_papers: result.retrieved_papers, evidence_gaps: result.evidence_gaps, consensus_level: result.consensus_level } });
+    const savedTurn = { turn_id: result.turn_id, sequence: record.turns.length + 1, user_message: body.message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', public_response: { cited_pmids: result.cited_pmids, evidence_table: result.evidence_table, retrieved_papers: result.retrieved_papers, evidence_gaps: result.evidence_gaps, consensus_level: result.consensus_level, interpretation: result.interpretation } };
+    if (session?.role === 'admin') savedTurn.request_id = result.request_id;
+    record.turns.push(savedTurn);
     if (session?.role === 'admin') auditRows.unshift({ id: result.request_id, query: body.message, username: session.username, role: session.role, operation: 'conversation_turn', status: 'completed', answer_status: result.answer_status, conversation_id: id, turn_id: result.turn_id, started_at: '2026-09-29T12:00:00Z', duration_ms: 12 });
     data = result;
     }
@@ -72,6 +75,10 @@ await page.route('**/api/**', async route => {
     const id = url.pathname.split('/').pop();
     const item = auditRows.find(row => row.id === id) || auditRows[0];
     data = { ...item, error: null, response: { synthesis: 'SUPPORTED response for admin controlled question. [PMID: 12345]', cited_pmids: ['12345'], evidence_table: [{ pmid: '12345', supporting_text_spans: ['Supporting span for admin controlled question'] }], retrieved_papers: [{ pmid: '12345', title: 'Illustrative research record' }] }, trace: { citation_audit: { valid: true, cited_pmids: ['12345'] }, timings_ms: { total: 12 } }, events: [{ stage: 'agent_decision', payload: { action: 'RESEARCH', complexity_hint: 'SIMPLE' } }, { stage: 'answer_released', payload: { status: 'SUPPORTED', claim_count: 1 } }] };
+  } else if (/^\/api\/trace\/[^/]+$/.test(url.pathname)) {
+    traceRequests.push({ role: session?.role, id: url.pathname.split('/').pop() });
+    if (session?.role !== 'admin') { status = 403; data = { detail: 'Administrator access required' }; }
+    else data = { request_id: 'run-1', original_query: 'admin controlled question', query_plan: { canonical_query: 'Admin canonical query', route: 'MODERATE', router_confidence: 0.98, router_reasoning: 'ADMIN TRACE ROUTING DETAILS', subqueries: ['Admin trace expanded query'] }, retrieval_iterations: [{ iteration: 1, subqueries: ['Admin trace retrieval query'], channels_used: ['bm25'], retrieved_pmids: ['12345'], reason: 'Admin trace retrieval reason' }], final_evidence_pmids: ['12345'], timestamp: '2026-09-29T12:00:00Z', synthesis_metadata: { evaluation_metric: 'ADMIN TRACE METRIC 0.97' } };
   } else if (/\/api\/conversations\/[^/]+$/.test(url.pathname)) {
     const id = url.pathname.split('/').pop();
     const record = conversations.get(id);
@@ -101,6 +108,17 @@ try {
   const send = page.locator('.conversation-composer button[type="submit"]');
   assert.equal(await send.isDisabled(), true, 'duplicate submit must be disabled while request is running');
   await page.getByText('SUPPORTED response for first question.').waitFor();
+  const publicConversation = page.getByRole('region', { name: 'Conversation messages' });
+  await publicConversation.getByText('Canonical question for first question').waitFor();
+  assert.equal(await publicConversation.getByText('Does Treatment A improve outcomes for first question?', { exact: true }).count(), 2, 'planned subquestion and its qualitative coverage are both shown');
+  assert.equal(await publicConversation.getByText('Covered', { exact: true }).count(), 2, 'qualitative coverage appears in interpretation and evidence table');
+  await publicConversation.getByText('bm25', { exact: true }).waitFor();
+  await publicConversation.getByText(/Supporting span for first question/).waitFor();
+  for (const secret of ['PRIVATE ROUTER REASONING', '0.98', '0.97', 'PRIVATE GRAPH NODE', 'PRIVATE TRACE FIELD', 'ADMIN TRACE ROUTING DETAILS']) assert.equal(await publicConversation.getByText(secret, { exact: false }).count(), 0, `ordinary view must hide ${secret}`);
+  assert.equal(await publicConversation.getByRole('button', { name: /Research audit trail/i }).count(), 0, 'ordinary users see no trace control');
+  assert.equal(await publicConversation.getByRole('heading', { name: 'Ranked papers' }).count(), 0, 'ordinary users see no ranked paper surface');
+  assert.equal(await publicConversation.getByText(/^Rank \d+$/).count(), 0, 'ordinary users see no numeric retrieval ranks');
+  assert.equal(traceRequests.length, 0, 'ordinary users make no audit trace request');
   delayTurn = false;
 
   await page.getByRole('button', { name: /New conversation/i }).click();
@@ -156,10 +174,11 @@ try {
   assert.equal(await page.getByRole('tab').count(), 2, 'a conversation has one overview and one tab per normalized PMID');
   assert.equal(await page.getByRole('tab', { name: /Overview/i }).count(), 1, 'overview is a permanent tab');
   const spanFromFirst = page.getByRole('region', { name: 'Conversation messages' }).locator('.conversation-message').filter({ hasText: 'SUPPORTED response for first question.' }).locator('.citation-button');
-  const spanFromSecond = page.getByRole('region', { name: 'Conversation messages' }).locator('.conversation-message').filter({ hasText: 'SUPPORTED response for hold completion A.' }).locator('.message-span-link').first();
+  const spanFromSecond = page.getByRole('region', { name: 'Conversation messages' }).locator('.conversation-message').filter({ hasText: 'SUPPORTED response for hold completion A.' }).locator('.evidence-span').first();
   await spanFromFirst.click();
   await page.getByRole('tab', { name: /Illustrative research record/i }).waitFor();
   assert.equal(await page.getByRole('tab').count(), 2, 'reopening a PMID from another turn focuses its existing tab');
+  await page.locator('.evidence-toggle').click();
   await spanFromSecond.click();
   await page.getByRole('tabpanel').getByText('Supporting span for hold completion A', { exact: true }).waitFor();
   assert.equal(await page.locator('[data-evidence-span].is-highlighted').count(), 1, 'the selected supporting span is highlighted');
@@ -287,6 +306,20 @@ try {
   await page.getByLabel('Research message').fill('admin controlled question');
   await page.keyboard.press('Enter');
   await page.getByText('SUPPORTED response for admin controlled question.').waitFor();
+  await page.getByText('Canonical question for admin controlled question').waitFor();
+  assert.equal(traceRequests.length, 0, 'admin trace is not requested before expansion');
+  const adminConversation = page.getByRole('region', { name: 'Conversation messages' });
+  assert.equal(await adminConversation.getByText('PRIVATE ROUTER REASONING', { exact: true }).count(), 0, 'admin diagnostics do not come from the public turn payload');
+  assert.equal(await adminConversation.getByRole('button', { name: /Research audit trail/i }).count(), 1, 'administrator has an audit expansion control');
+  await page.getByRole('button', { name: /Research audit trail/i }).click();
+  await page.getByText('Admin trace expanded query').waitFor();
+  assert.deepEqual(traceRequests.at(-1), { role: 'admin', id: 'run-1' }, 'admin trace request follows explicit audit expansion');
+  await page.reload();
+  await page.getByRole('button', { name: /Research audit trail/i }).waitFor();
+  assert.equal(traceRequests.length, 1, 'restored admin history keeps audit trace collapsed without a request');
+  await page.getByRole('button', { name: /Research audit trail/i }).click();
+  await page.getByText('Admin trace expanded query').waitFor();
+  assert.deepEqual(traceRequests.at(-1), { role: 'admin', id: 'run-1' }, 'restored admin history loads its trace only after expansion');
   assert.deepEqual(lastTurnBody, { message: 'admin controlled question', year_min: 2020, year_max: 2024, study_types: ['Review'], max_loops: 4 });
   await page.getByRole('link', { name: 'Audit logs' }).click();
   await page.getByRole('cell', { name: 'admin controlled question' }).waitFor();

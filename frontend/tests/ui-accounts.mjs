@@ -14,14 +14,15 @@ async function scenario(role, width) {
   let researchBody = null;
   let createdAccount = null;
   let lastAuditParams = null;
+  const traceRequests = [];
   let nextConversationId = 1;
   let nextTurnId = 1;
   const conversations = new Map();
   const visualPaper = { pmid: '12345', title: 'Illustrative research record', abstract: 'Visual test fixture, not clinical evidence. This is the complete stored abstract.', authors: ['Example Author', 'Second Author'], journal: 'Visual Journal', year: 2024, study_type: 'Review', mesh_terms: ['Clinical Research', 'Evidence Synthesis'], doi: '10.0000/visual' };
   function createVisualTurn(conversationId, message) {
     const turnId = `visual-turn-${nextTurnId++}`;
-    const evidence = { pmid: '12345', title: visualPaper.title, key_findings: `Visual finding for ${message}`, outcome: 'Study outcome', limitations: 'Synthetic fixture limitation', supporting_text_spans: [`Visual supporting span for ${message}`] };
-    const result = { conversation_id: conversationId, turn_id: turnId, action: 'RESEARCH', answer_status: 'SUPPORTED', assistant_message: `VISUAL TEST DATA for ${message}. [PMID: 12345]`, cited_pmids: ['12345'], evidence_table: [evidence], retrieved_papers: [visualPaper], evidence_gaps: [], consensus_level: 'consensus', progress_summary: 'Synthetic UI fixture completed.', request_id: `visual-run-${turnId}` };
+    const evidence = { pmid: '12345', title: visualPaper.title, key_findings: `Visual finding for ${message}`, outcome: 'Study outcome', limitations: 'Synthetic fixture limitation', supporting_text_spans: [`Visual supporting span for ${message}`], retrieval_channels: ['bm25'], subquestion_ids: ['sq-1'] };
+    const result = { conversation_id: conversationId, turn_id: turnId, action: 'RESEARCH', answer_status: 'SUPPORTED', assistant_message: `VISUAL TEST DATA for ${message}. [PMID: 12345]`, cited_pmids: ['12345'], evidence_table: [evidence], retrieved_papers: [visualPaper], evidence_gaps: [], consensus_level: 'consensus', progress_summary: 'Synthetic UI fixture completed.', request_id: `visual-run-${turnId}`, interpretation: { canonical_question: `Visual canonical question for ${message}`, pico: { population: 'Adults', intervention: 'Treatment A', comparator: 'Usual care', outcome: 'Study outcome' }, mesh_concepts: ['Clinical Research'], route: 'SIMPLE', subquestions: [{ id: 'sq-1', question: `Visual planned subquestion for ${message}` }], coverage_statuses: [{ subquestion_id: 'sq-1', status: 'PARTIAL' }] } };
     const savedTurn = { turn_id: turnId, sequence: conversations.get(conversationId).turns.length + 1, user_message: message, action: result.action, answer_status: result.answer_status, assistant_message: result.assistant_message, created_at: '2026-09-29T12:00:00Z', result };
     conversations.get(conversationId).turns.push(savedTurn);
     return result;
@@ -59,6 +60,7 @@ async function scenario(role, width) {
       data = { conversation: record.conversation, turns: record.turns, next_cursor: null };
     }
     else if (url.pathname === '/api/admin/audits') { lastAuditParams = url.searchParams; data = { total: 1, items: [{ id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', operation: 'conversation_turn', status: 'completed', started_at: '2026-09-28T19:00:00Z', duration_ms: 130, conversation_id: 'conversation-1', turn_id: 'turn-1', answer_status: 'SUPPORTED' }] }; }
+    else if (/^\/api\/trace\//.test(url.pathname)) { traceRequests.push({ role: session?.role, id: url.pathname.split('/').pop() }); data = { request_id: url.pathname.split('/').pop(), original_query: 'visual query', query_plan: { canonical_query: 'Admin canonical visual query', route: 'MODERATE', subqueries: ['Admin visual retrieval query'] }, retrieval_iterations: [{ iteration: 1, channels_used: ['bm25'] }] }; }
     else if (url.pathname === '/api/admin/audits/sample-run') data = { id: 'sample-run', username: 'sample-user', query: 'kidney outcomes', status: 'completed', operation: 'conversation_turn', started_at: '2026-09-28T19:00:00Z', conversation_id: 'conversation-1', turn_id: 'turn-1', agent_action: 'RESEARCH', agent_complexity_hint: 'MODERATE', rule_route: 'SIMPLE', final_route: 'MODERATE', answer_status: 'SUPPORTED', correction_count: 1, evidence_gaps: ['Missing pediatric evidence'], stage_durations_ms: { retrieve: 12, judge: 8 }, response: { synthesis: 'VISUAL TEST DATA [PMID: 12345].', retrieved_papers: [], evidence_table: [] }, trace: { citation_audit: { valid: true }, timings_ms: { total: 130 } }, events: [{ stage: 'agent_decision', timestamp: '2026-09-28T19:00:00Z', payload: { action: 'RESEARCH' } }, { stage: 'query_enhanced', payload: { iteration: 0 } }, { stage: 'route_arbitrated', payload: { route: 'MODERATE' } }, { stage: 'retrieve', payload: { status: 'completed' } }, { stage: 'judge', payload: { status: 'completed' } }, { stage: 'claim_verified', payload: { claim_count: 1 } }, { stage: 'answer_released', payload: { status: 'SUPPORTED' } }] };
     else if (url.pathname === '/api/admin/observability') data = { total_queries: 1, by_status: { completed: 1 }, by_operation: { research: 1 }, average_duration_ms: 130, p95_duration_ms: 130 };
     else if (url.pathname === '/api/admin/accounts') { if (request.method() === 'POST') { createdAccount = body; data = { id: 'new-account', ...body }; } else { const offset = Number(url.searchParams.get('offset') || 0); const limit = Number(url.searchParams.get('limit') || 50); const accounts = Array.from({ length: 26 }, (_, index) => ({ ...session, id: `account-${index}`, username: index === 25 ? 'last-page-reader' : `reader-${index}`, display_name: index === 25 ? 'Last Page Reader' : `Reader ${index}` })); data = { total: accounts.length, items: accounts.slice(offset, offset + limit) }; } }
@@ -130,6 +132,10 @@ async function scenario(role, width) {
     await page.getByLabel('Research message').fill('kidney outcomes');
     await page.getByRole('button', { name: 'Send' }).click();
     await page.getByText('VISUAL TEST DATA', { exact: false }).waitFor();
+    await page.getByText('Visual canonical question for kidney outcomes').waitFor();
+    assert.equal(await page.getByText('Visual planned subquestion for kidney outcomes', { exact: true }).count(), 2, 'planned subquestion and coverage both reference the question');
+    assert.equal(await page.getByText('Partially covered', { exact: true }).count(), 2, 'qualitative coverage appears in interpretation and evidence table');
+    assert.equal(traceRequests.length, 0, 'conversation rendering does not eagerly request admin trace data');
     if (role === 'admin') {
       const turnAuditLink = page.getByRole('link', { name: 'View turn audit' });
       await turnAuditLink.waitFor();

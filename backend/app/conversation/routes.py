@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 
 from backend.app.auth.security import require_ready_account, require_ready_csrf
 from backend.app.conversation.agent import ConversationAgent
@@ -65,6 +66,8 @@ def conversation_detail(
     result = service.detail(conversation_id, account, limit=limit, offset=offset)
     if result is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if account.get("role") == "admin":
+        return JSONResponse(content=result.model_dump(mode="json"))
     return result
 
 

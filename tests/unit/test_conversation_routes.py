@@ -17,6 +17,7 @@ def client(tmp_path, monkeypatch):
     initialize_db(path)
     AccountStore(path).create("reader", "Reader", "user", hash_password("reader-password-123"), None, False)
     AccountStore(path).create("other", "Other", "user", hash_password("other-password-123"), None, False)
+    AccountStore(path).create("administrator", "Administrator", "admin", hash_password("admin-password-123"), None, False)
     with TestClient(main.app, base_url="http://testserver") as value:
         yield value
     get_settings.cache_clear()
@@ -56,6 +57,38 @@ def test_create_list_detail_and_owned_turn_routes(client):
     assert client.get(f"/conversations/{conversation_id}", headers=headers).status_code == 200
     assert client.get("/conversations/not-owned", headers=headers).status_code == 404
     assert client.get("/conversations?limit=101", headers=headers).status_code == 422
+
+
+def test_restored_conversation_detail_exposes_audit_request_id_only_to_admins(client):
+    path = get_settings().APP_DATABASE_PATH
+    store = ConversationStore(path)
+
+    def completed_conversation(account):
+        conversation = store.create(account["id"])
+        turn = store.begin_turn(conversation["id"], account["id"], "test question")
+        store.complete_turn(
+            turn["id"], agent_action="RESEARCH", standalone_query="test question",
+            complexity_hint="SIMPLE", final_route="SIMPLE", answer_status="SUPPORTED",
+            assistant_message="Supported [PMID: 12345]", audit_run_id="trace-run-123",
+            public_response={"request_id": "trace-run-123", "cited_pmids": ["12345"], "evidence_table": [], "retrieved_papers": [], "evidence_gaps": []},
+        )
+        return conversation["id"]
+
+    reader_headers = _headers(client)
+    reader = AccountStore(path).by_username("reader")
+    reader_conversation = completed_conversation(reader)
+    public_turn = client.get(f"/conversations/{reader_conversation}", headers=reader_headers).json()["turns"][0]
+    assert "request_id" not in public_turn
+    assert "request_id" not in public_turn["result"]
+
+    login = client.post("/auth/login", json={"username": "administrator", "password": "admin-password-123"}, headers={"Origin": "http://testserver"})
+    assert login.status_code == 200
+    admin_headers = {"Origin": "http://testserver", "X-CSRF-Token": client.cookies.get("evidence_csrf")}
+    administrator = AccountStore(path).by_username("administrator")
+    admin_conversation = completed_conversation(administrator)
+    admin_turn = client.get(f"/conversations/{admin_conversation}", headers=admin_headers).json()["turns"][0]
+    assert admin_turn["request_id"] == "trace-run-123"
+    assert "request_id" not in admin_turn["result"]
 
 
 def test_turn_post_rejects_missing_csrf_and_advanced_user_controls(client):
