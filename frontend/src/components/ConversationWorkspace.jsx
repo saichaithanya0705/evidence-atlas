@@ -3,7 +3,7 @@ import { createConversation, getConversation, listConversations, submitConversat
 import ConversationHistory from "./ConversationHistory.jsx";
 import ConversationList from "./ConversationList.jsx";
 import ResearchComposer from "./ResearchComposer.jsx";
-import EvidenceWorkspace from "./EvidenceWorkspace.jsx";
+import { ConversationEvidenceDetails } from "./ConversationMessage.jsx";
 
 function errorText(error) { return error instanceof Error ? error.message : "An unexpected error occurred."; }
 
@@ -16,7 +16,8 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   const [submittingIds, setSubmittingIds] = useState(() => new Set());
   const [submissionError, setSubmissionError] = useState("");
   const [pending, setPending] = useState(null);
-  const [showList, setShowList] = useState(!conversationId);
+  const [showList, setShowList] = useState(false);
+  const [draft, setDraft] = useState("");
   const loadGeneration = useRef(0);
   const skipLoadId = useRef(null);
   const activeConversationIdRef = useRef(conversationId);
@@ -65,8 +66,8 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
   const submitting = submittingIds.has(activeLockKey);
   useEffect(() => { if (focusAfterResponse.current && !submitting) { responseRef.current?.focus(); focusAfterResponse.current = false; } }, [turns, submitting]);
 
-  function startNew() { activeConversationIdRef.current = null; setActiveConversation(null); setTurns([]); setPending(null); setSubmissionError(""); setShowList(false); navigate(isAdmin ? "/admin/research" : "/research"); }
-  function selectConversation(id) { activeConversationIdRef.current = id; setPending(null); setSubmissionError(""); setShowList(false); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
+  function startNew() { activeConversationIdRef.current = null; setActiveConversation(null); setTurns([]); setPending(null); setDraft(""); setSubmissionError(""); setShowList(false); navigate(isAdmin ? "/admin/research" : "/research"); }
+  function selectConversation(id) { activeConversationIdRef.current = id; setPending(null); setDraft(""); setSubmissionError(""); setShowList(false); navigate(`${isAdmin ? "/admin" : ""}/research/${encodeURIComponent(id)}`); }
   const openEvidence = useCallback((pmid, target = {}) => {
     const matchingTurn = turns.find(turn => turn.turn_id === target.turnId);
     const paper = target.paper || matchingTurn?.result?.retrieved_papers?.find(item => String(item.pmid) === String(pmid)) || turns.flatMap(turn => turn.result?.retrieved_papers || []).find(item => String(item.pmid) === String(pmid)) || { pmid, title: `PMID ${pmid}` };
@@ -107,7 +108,7 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
       const completedTurn = { ...localTurn, turn_id: response.turn_id, action: response.action, answer_status: response.answer_status, assistant_message: response.assistant_message, result: response };
       const responseIsActive = canUpdateActive();
       if (responseIsActive) {
-        setTurns(current => [...current.filter(turn => turn.turn_id !== localTurn.turn_id), completedTurn]);
+        setTurns(current => [...current.filter(turn => turn.turn_id !== localTurn.turn_id && turn.turn_id !== response.turn_id), completedTurn]);
         setPending(null);
         focusAfterResponse.current = shouldFocusResponse;
         setActiveConversation(current => current && ["New conversation", "New research"].includes(current.title) ? { ...current, title: message.slice(0, 80) } : current);
@@ -131,19 +132,31 @@ export default function ConversationWorkspace({ conversationId, isAdmin, navigat
     }
   }
 
-  const title = activeConversation?.title || "Research conversations";
+  const firstQuestion = turns.find(turn => typeof turn.user_message === "string" && turn.user_message)?.user_message;
+  const latestCompleted = [...turns].reverse().find(turn => turn.assistant_message);
+  const persistedTitle = activeConversation?.title;
+  const title = firstQuestion && persistedTitle === firstQuestion.slice(0, 80)
+    ? firstQuestion
+    : persistedTitle || "Research conversations";
+  function usePrompt(question) { setDraft(question); requestAnimationFrame(() => document.getElementById("conversation-message")?.focus()); }
+  const examples = [
+    { topic: "Care delivery", title: "Telehealth & blood pressure", question: "Does telehealth improve blood pressure control in nondialysis CKD?" },
+    { topic: "Long-term risk", title: "Kidney stones & later CKD", question: "Is nephrolithiasis associated with later CKD or end-stage kidney disease?" },
+    { topic: "Prognosis", title: "Kidney involvement in amyloidosis", question: "What renal outcomes and survival predictors occur in AA amyloidosis with kidney involvement?" },
+  ];
   return <main className={`app-main conversation-workspace ${isAdmin ? "admin-research" : "user-research"}`}>
-    <header className="conversation-header"><div><span className="eyebrow">{isAdmin ? "ADMIN RESEARCH DESK" : "YOUR RESEARCH DESK"}</span><h1>{title}</h1><p>Follow the evidence through focused research questions and follow-up discussion.</p></div><div className="conversation-header-actions"><button type="button" onClick={() => setShowList(value => !value)} aria-expanded={showList}>Conversations</button><button type="button" onClick={startNew}>New conversation</button></div></header>
+    <header className={`conversation-header ${!conversationId ? "research-welcome" : ""}`}><div><span className="eyebrow">THE RESEARCH DESK <span aria-hidden="true">/</span> PUBMED ABSTRACTS</span><h1>{title}</h1><p>{conversationId ? "Explore the findings, check the sources, and ask what comes next." : "Ask a focused question. See what the studies report, where they agree, and what remains uncertain."}</p></div><div className="conversation-header-actions"><button type="button" onClick={() => setShowList(value => !value)} aria-expanded={showList}>Conversations <span className="history-count">{conversations.length}</span></button><button className="new-research-button" type="button" onClick={startNew}><span aria-hidden="true">＋</span> New conversation</button></div></header>
     {showList && <ConversationList conversations={conversations} activeId={conversationId} loading={listState.loading} error={listState.error} onNew={startNew} onSelect={selectConversation} />}
     {detailState.loading && <p role="status">Loading conversation…</p>}
     {detailState.error && <p className="conversation-error" role="alert">{detailState.error}</p>}
     {!detailState.loading && !detailState.error && <>
       {conversationId && <ConversationHistory turns={turns} pending={pending} responseRef={responseRef} onEvidence={openEvidence} onPaper={openRankedPaper} isAdmin={isAdmin} navigate={navigate} activePmids={activePmids} />}
-      {!conversationId && !showList && <p className="conversation-empty">Start with a research question. Your messages will be saved in this conversation.</p>}
-      <ResearchComposer onSubmit={submit} submitting={submitting} isAdmin={isAdmin} />
+      <ResearchComposer draft={draft} onDraftChange={setDraft} onSubmit={submit} submitting={submitting} isAdmin={isAdmin} hasConversation={Boolean(conversationId)} />
       {submissionError && <p className="conversation-error" role="alert">{submissionError}</p>}
+      {!conversationId && <section className="research-start" aria-label="Research starting points"><div className="starting-heading"><h2>A few questions to start with</h2><span>Choose one to edit before searching</span></div><div className="research-examples">{examples.map((example, index) => <button type="button" key={example.topic} onClick={() => usePrompt(example.question)}><span className="example-index">0{index + 1}</span><span className="example-copy"><small>{example.topic}</small><strong>{example.title}</strong><span>{example.question}</span></span><span className="example-arrow" aria-hidden="true">↗</span></button>)}</div><div className="research-method"><div><span className="method-mark" aria-hidden="true">↳</span><h2>Every answer has a paper trail.</h2></div><p>Search the local PubMed collection, read source-linked findings, and open the original abstracts alongside your conversation. Limited evidence stays visible, so you can decide what to explore next.</p><details><summary>How to read an answer</summary><p><strong>Source-backed findings</strong> are checked against retrieved abstracts. They are not a measure of study quality or clinical certainty. <strong>Partial answers</strong> leave part of the question unresolved. <strong>Limited evidence</strong> means this search could not establish an answer; it does not mean no research exists.</p></details></div></section>}
+      {conversationId && turns.some(turn => turn.result?.cited_pmids?.length) && !submitting && <nav className="followup-prompts" aria-label="Suggested follow-up questions"><span>Continue exploring</span>{["What are the limitations of these studies?", "Which findings are consistent across the studies?"].map(question => <button type="button" key={question} onClick={() => usePrompt(question)}>{question}</button>)}</nav>}
+      {conversationId && latestCompleted?.assistant_message && latestCompleted.action !== "CLARIFY" && latestCompleted.action !== "ABSTAIN" && <ConversationEvidenceDetails key={latestCompleted.turn_id} content={latestCompleted.assistant_message} result={latestCompleted.result} turnId={latestCompleted.turn_id} onEvidence={openEvidence} onPaper={openRankedPaper} isAdmin={isAdmin} activePmids={activePmids} />}
     </>}
     <p className="research-disclaimer" role="note">Research support, not medical advice. Review the original papers.</p>
-    <EvidenceWorkspace workspace={evidenceWorkspace} />
   </main>;
 }

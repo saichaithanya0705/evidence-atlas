@@ -24,10 +24,11 @@ class Settings(BaseSettings):
     LLM_MODE: str = Field(default="mock", description="'nim', 'mock', or 'openai'")
     LLM_TEMPERATURE: float = Field(default=0.1)
     LLM_MAX_TOKENS: int = Field(default=2048)
-    LLM_SYNTHESIS_MAX_TOKENS: int = Field(default=300, ge=128, le=2048)
+    LLM_SYNTHESIS_MAX_TOKENS: int = Field(default=2048, ge=128, le=2048)
     LLM_TIMEOUT_SECONDS: float = Field(default=30.0)
     LLM_STRUCTURED_TIMEOUT_SECONDS: float = Field(default=10.0, ge=1.0, le=60.0)
-    LLM_RESEARCH_BUDGET_SECONDS: float = Field(default=20.0, ge=5.0, le=180.0)
+    LLM_SYNTHESIS_TIMEOUT_SECONDS: float = Field(default=30.0, ge=1.0, le=60.0)
+    LLM_RESEARCH_BUDGET_SECONDS: float = Field(default=60.0, ge=5.0, le=180.0)
     LLM_JUDGE_ON_SUFFICIENT: bool = Field(
         default=False,
         description="Run the optional remote evidence judge even when deterministic evidence is sufficient and fully covered",

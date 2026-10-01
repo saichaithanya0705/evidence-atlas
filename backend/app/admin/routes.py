@@ -1,6 +1,6 @@
 """Read-only audit history and observability endpoints."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.app.auth.security import require_admin
@@ -25,13 +25,31 @@ def store():
     return AuditStore(get_settings().APP_DATABASE_PATH)
 
 
+def _date_bound(value):
+    if value is None:
+        return None
+    try:
+        if len(value) == 10:
+            parsed = datetime.combine(date.fromisoformat(value), datetime.min.time(), timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("Timezone required")
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError):
+        raise HTTPException(status_code=422, detail="Audit date filters must be ISO dates or timestamps with a timezone.")
+
+
 @router.get("/audits")
 def audits(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
            account: str | None = None, status: str | None = None, query: str | None = None,
            from_date: str | None = None, to_date: str | None = None,
            administrator=Depends(require_admin)):
+    start, end = _date_bound(from_date), _date_bound(to_date)
+    if start and end and start >= end:
+        raise HTTPException(status_code=422, detail="The audit date range is invalid.")
     return store().list_runs(limit=limit, offset=offset, account=account, status=status,
-                             query=query, from_date=from_date, to_date=to_date)
+                             query=query, from_date=start, to_date=end)
 
 
 @router.get("/audits/{run_id}")

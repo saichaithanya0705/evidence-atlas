@@ -266,12 +266,9 @@ def test_semantic_verifier_rejects_unknown_sources_and_incomplete_verdict_sets(p
 
 
 def test_limited_answer_keeps_independently_supported_claim_and_prunes_partial_verdict():
-    import json
-    from types import SimpleNamespace
-
     from backend.app.models.request_response import ClaimVerification, EvidenceRecord
     from tests.unit.test_research_pipeline import AlwaysPartialJudge, make_candidate, make_test_service
-    from backend.app.workflow.synthesis import EvidenceSynthesizer
+    from backend.app.workflow.synthesis import EvidenceSynthesizer, SynthesisResult
 
     first_span = "Drug A reduced kidney disease progression among adults with diabetes."
     second_span = "Drug B reduced hospitalization among adults with heart failure."
@@ -293,18 +290,19 @@ def test_limited_answer_keeps_independently_supported_claim_and_prunes_partial_v
                 for index, claim in enumerate(claims)
             ]
 
+    generated = (
+        "Among adults with diabetes, Drug A reduced kidney disease progression [PMID: 12345].\n"
+        "Among adults with heart failure, Drug B reduced hospitalization [PMID: 67890]."
+    )
+
+    class UnverifiedGeneratedSynthesizer(EvidenceSynthesizer):
+        def synthesize(self, query, records, gaps, insufficient=False):
+            audit = self.validator.validate(generated, records)
+            assert audit.valid
+            return SynthesisResult(generated, "nvidia_nim", None, audit)
+
     service = make_test_service(judge=AlwaysPartialJudge())
-    completion = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
-        "selections": [{"pmid": "12345", "span_index": 0}, {"pmid": "67890", "span_index": 0}],
-    })))] )
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_kwargs: completion)))
-    settings = SimpleNamespace(
-        LLM_MODE="nim", NVIDIA_MODEL_NAME="fixture-model", LLM_MAX_TOKENS=2048,
-        LLM_SYNTHESIS_MAX_TOKENS=300,
-    )
-    service._synthesizer = EvidenceSynthesizer(
-        client=client, settings=settings, semantic_verifier=SelectiveVerifier(),
-    )
+    service._synthesizer = UnverifiedGeneratedSynthesizer(semantic_verifier=SelectiveVerifier())
     evidence = [
         EvidenceRecord(pmid="12345", key_findings=first_span, supporting_text_spans=[first_span]),
         EvidenceRecord(pmid="67890", key_findings=second_span, supporting_text_spans=[second_span]),

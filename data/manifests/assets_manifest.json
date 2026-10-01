@@ -4,7 +4,7 @@
   "status": "ready",
   "dataset": {
     "path": "data/raw/pubmed_sample.csv",
-    "record_count": 29995,
+    "record_count": 23120,
     "status": "ready"
   },
   "models": {

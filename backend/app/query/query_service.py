@@ -234,12 +234,37 @@ class QueryAnalysisService:
             study_type_filters=final_study_types,
         )
 
-        pico = self.pico_extractor.extract(combined_query, clean_q)
-        non_pico = self.non_pico_extractor.extract(combined_query, clean_q)
+        # Parse each utterance independently: concatenating two questions lets
+        # greedy component extraction swallow the next question as a treatment.
+        # Raw constraints take precedence; the rewrite can resolve a follow-up.
+        _, raw_clean, _ = self.normalizer.normalize(raw_query)
+        pico = self.pico_extractor.extract(raw_query, raw_clean)
+        non_pico = self.non_pico_extractor.extract(raw_query, raw_clean)
+        rewrite_pico = PICOModel()
+        rewrite_non_pico = None
+        if agent_rewrite and agent_rewrite.strip():
+            _, rewrite_clean, _ = self.normalizer.normalize(agent_rewrite)
+            rewrite_pico = self.pico_extractor.extract(agent_rewrite, rewrite_clean)
+            rewrite_non_pico = self.non_pico_extractor.extract(agent_rewrite, rewrite_clean)
+            pico = PICOModel(**{
+                field: getattr(pico, field) or getattr(rewrite_pico, field)
+                for field in PICOModel.model_fields
+            })
+            non_pico = NonPICOConcepts(**{
+                field: getattr(non_pico, field) or getattr(rewrite_non_pico, field)
+                for field in NonPICOConcepts.model_fields
+            })
         intent = self.intent_classifier.classify(combined_query, clean_q, pico)
         concept_weights = assign_concept_weights(
             pico, non_pico, mesh_terms, acronyms, self.mesh_service
         )
+        if rewrite_non_pico is not None:
+            rewrite_weights = assign_concept_weights(
+                rewrite_pico, rewrite_non_pico, [], {}, self.mesh_service
+            )
+            concept_weights.must_have = list(dict.fromkeys(
+                concept_weights.must_have + rewrite_weights.must_have
+            ))
         canonical_q = self.canonical_formulator.formulate_deterministic(
             original_query=combined_query,
             clean_query=clean_q,

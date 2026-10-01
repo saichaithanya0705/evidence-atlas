@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {auditDate,auditDuration,auditListUrl,auditRequestParams,readAuditFilters} from '../src/auditPresentation.js';
+const filters = {query:'vaccines & trials',account:'administrator',status:'completed',from_date:'2026-10-01',to_date:'2026-10-01'};
+const url = auditListUrl(filters,25);
+assert.deepEqual(readAuditFilters(url.split('?')[1]), {...filters,offset:25});
+assert.equal(readAuditFilters('offset=-4&from_date=bad').offset,0);
+assert.equal(readAuditFilters('from_date=bad').from_date,undefined);
+const params = auditRequestParams(filters,25);
+assert.equal(params.from_date,new Date(2026,9,1).toISOString());
+assert.equal(params.to_date,new Date(2026,9,2).toISOString());
+assert.equal(auditDate(null),'Not recorded');
+assert.equal(auditDate('invalid'),'Not recorded');
+assert.equal(auditDuration(15470.8),'15.471 s');
+assert.equal(auditDuration(-1),'Not recorded');
+console.log('Audit presentation contracts passed: URL persistence, timezone bounds, timestamps and durations.');

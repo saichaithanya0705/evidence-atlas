@@ -5,6 +5,7 @@ import sqlite3
 import uuid
 
 from .database import connect_db, utc_now
+from backend.app.core.limits import CONVERSATION_ASSISTANT_MAX_CHARS
 
 
 class ConversationBusyError(RuntimeError):
@@ -127,7 +128,7 @@ class ConversationStore:
         complexity_hint: str | None, final_route: str | None, answer_status: str,
         assistant_message: str, audit_run_id: str, public_response: dict,
     ) -> dict:
-        assistant_message = _bounded_text(assistant_message, "assistant message", _MESSAGE_MAX, allow_empty=True)
+        assistant_message = _bounded_text(assistant_message, "assistant message", CONVERSATION_ASSISTANT_MAX_CHARS, allow_empty=True)
         encoded = json.dumps(public_response, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str, allow_nan=False)
         completed = utc_now()
         with connect_db(self.path) as db:
@@ -145,7 +146,7 @@ class ConversationStore:
             return dict(db.execute("SELECT * FROM conversation_turns WHERE id=?", (turn_id,)).fetchone())
 
     def fail_turn(self, turn_id: str, *, assistant_message: str, audit_run_id: str | None = None) -> dict:
-        assistant_message = _bounded_text(assistant_message, "assistant message", _MESSAGE_MAX, allow_empty=True)
+        assistant_message = _bounded_text(assistant_message, "assistant message", CONVERSATION_ASSISTANT_MAX_CHARS, allow_empty=True)
         completed = utc_now()
         with connect_db(self.path) as db:
             row = db.execute("SELECT conversation_id,status FROM conversation_turns WHERE id=?", (turn_id,)).fetchone()

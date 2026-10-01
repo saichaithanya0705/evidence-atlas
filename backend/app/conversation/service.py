@@ -15,6 +15,7 @@ from backend.app.conversation.models import (
     AdminConversationTurnResponse,
     AdminConversationTurnRecord,
     ConversationCreateResponse,
+    ConversationAgentDecision,
     ConversationDetailResponse,
     ConversationHistoryWindow,
     ConversationSummary,
@@ -246,8 +247,6 @@ class ConversationService:
             saved = json.loads(row.get("public_response_json") or "{}")
             candidates.extend(RetrievalCandidate.model_validate(item) for item in saved.get("retrieved_papers", []))
             evidence.extend(EvidenceRecord.model_validate(item) for item in saved.get("evidence_table", []))
-        if not evidence:
-            raise ValueError("No validated evidence is available from the referenced turns")
         return candidates, evidence
 
     def run_turn(self, conversation_id: str, account: dict, request: ConversationTurnRequest) -> ConversationTurnResponse | AdminConversationTurnResponse:
@@ -273,7 +272,10 @@ class ConversationService:
             if turn["ordinal"] == 1:
                 self.store.update_title(conversation_id, account_id, message[:80] or "New research")
             self.audit.start(
-                run_id, account, "conversation_turn", message[:4000], {}, {},
+                run_id, account, "conversation_turn", message[:4000],
+                {key: getattr(request, key) for key in request.model_fields_set
+                 if is_admin and key in {"year_min", "year_max", "study_types", "max_loops"}
+                 and getattr(request, key) is not None}, {},
                 conversation_id=conversation_id, turn_id=turn_id,
             )
             audit_started = True
@@ -296,21 +298,33 @@ class ConversationService:
                     ) if value is not None
                 } if is_admin else {}
                 max_loops = request.max_loops if is_admin else self.max_loops
+                self.audit.applied(run_id, {**filters, "max_loops": max_loops})
                 research_response = self.research.research(
                     message, filters, max_loops, run_id, event_sink,
                     agent_rewrite=decision.standalone_query,
                     agent_complexity_hint=decision.complexity_hint,
                 )
                 final_route = _value(research_response, "route")
-                assistant_message = str(_value(research_response, "synthesis", ""))[:4000]
+                assistant_message = str(_value(research_response, "synthesis", ""))
             elif decision.action is AgentAction.ANSWER_FROM_EVIDENCE:
                 page = self.store.detail_for_account(conversation_id, account_id, limit=100, offset=0)
                 candidates, evidence = self._answer_from_prior(decision, page)
-                research_response = self.research.answer_from_evidence(
-                    decision.standalone_query, candidates=candidates, evidence=evidence, event_sink=event_sink,
-                )
-                final_route = _value(research_response, "route")
-                assistant_message = str(_value(research_response, "synthesis", ""))[:4000]
+                if evidence:
+                    research_response = self.research.answer_from_evidence(
+                        decision.standalone_query, candidates=candidates, evidence=evidence, event_sink=event_sink,
+                    )
+                    final_route = _value(research_response, "route")
+                    assistant_message = str(_value(research_response, "synthesis", ""))
+                else:
+                    event_sink("followup_evidence_unavailable", {"action": "CLARIFY", "referenced_turn_count": len(decision.referenced_turn_ids)})
+                    decision = ConversationAgentDecision(
+                        action=AgentAction.CLARIFY,
+                        message="The previous search did not release enough validated evidence for that comparison. Which population or outcome would you like to refine in a new search?",
+                        decision_summary="Referenced turns contained no released evidence to synthesize.",
+                    )
+                    standalone_query = None
+                    complexity_hint = None
+                    assistant_message = decision.message
             else:
                 assistant_message = decision.message or "Please clarify your research question."
 
@@ -327,7 +341,7 @@ class ConversationService:
                 if isinstance(status, str):
                     status = AnswerStatus(status)
                 consensus = _value(research_response, "consensus_level", "insufficient")
-                assistant_message = str(_value(research_response, "synthesis", assistant_message))[:4000]
+                assistant_message = str(_value(research_response, "synthesis", assistant_message))
             public_payload["request_id"] = run_id
             public_payload["answer_status"] = status.value
 
@@ -352,7 +366,9 @@ class ConversationService:
             if is_admin:
                 response_payload["request_id"] = run_id
             response = response_type.model_validate(response_payload)
-            self.audit.finish(run_id, "completed", public_payload, None)
+            trace_id = _value(research_response, "request_id", run_id) if research_response else run_id
+            trace_payload = self.research.get_trace(trace_id) if research_response and hasattr(self.research, "get_trace") else None
+            self.audit.finish(run_id, "completed", public_payload, trace_payload)
             self.store.complete_turn(
                 turn_id, agent_action=decision.action.value, standalone_query=standalone_query,
                 complexity_hint=complexity_hint, final_route=final_route,

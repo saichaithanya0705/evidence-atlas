@@ -125,6 +125,9 @@ def _validate_release_text(text: str, records: Sequence[EvidenceRecord], synthes
     audit = validator.validate(text, records)
     if not audit.valid:
         return False, audit
+    exact_check = getattr(synthesizer, "_is_exact_span_text", None)
+    if callable(exact_check) and exact_check(text, records):
+        return True, audit
     claims = _claims(text)
     if not claims:
         return True, audit
@@ -136,7 +139,6 @@ def _validate_release_text(text: str, records: Sequence[EvidenceRecord], synthes
         except Exception:
             return False, audit
         return len(verdicts) == len(claims) and all(item.supported for item in verdicts), audit
-    exact_check = getattr(synthesizer, "_is_exact_span_text", None)
     if not callable(exact_check) or not exact_check(text, records):
         return False, audit
     return True, audit
@@ -935,7 +937,7 @@ class ResearchService:
                 answer_status = AnswerStatus.FAILED
             elif workflow.analysis["consensus_level"] == "conflicting" or (workflow.grade and workflow.grade.conflicts):
                 answer_status = AnswerStatus.INSUFFICIENT
-            elif workflow.grade and workflow.grade.grade == "SUFFICIENT" and synthesis.audit.valid and synthesis.audit.cited_pmids:
+            elif workflow.grade and workflow.grade.grade == "SUFFICIENT" and not response_gaps and synthesis.audit.valid and synthesis.audit.cited_pmids:
                 answer_status = AnswerStatus.SUPPORTED
             elif synthesis.audit.valid and synthesis.audit.cited_pmids:
                 answer_status = AnswerStatus.LIMITED
@@ -1012,6 +1014,7 @@ class ResearchService:
                 "request_id": request_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "original_query": query,
+                "execution_mode": "research",
                 "query_plan": workflow.initial_plan.model_dump(mode="json"),
                 "research_plan": workflow.research_plan.model_dump(mode="json"),
                 "coverage_history": workflow.coverage_history,
@@ -1123,7 +1126,7 @@ class ResearchService:
         graph.add_edge("synthesize", "validate")
         graph.add_edge("validate", "done")
         graph.add_edge("done", END)
-        with semantic_verification_scope(), llm_request_scope(float(getattr(self.settings, "LLM_RESEARCH_BUDGET_SECONDS", 20))):
+        with semantic_verification_scope(), llm_request_scope(float(getattr(self.settings, "LLM_RESEARCH_BUDGET_SECONDS", 60))):
             result = graph.compile().invoke(
                 {
                     "workflow": state,
@@ -1166,19 +1169,37 @@ class ResearchService:
     ) -> ResearchResponse:
         """Answer from supplied evidence only; re-run deterministic and semantic gates."""
         request_id = str(uuid.uuid4())
+        started = perf_counter()
+        stage_timings = []
+        def begin_stage(stage):
+            if event_sink:
+                event_sink(stage, {"status": "started"})
+            return perf_counter()
+        def complete_stage(stage, stage_started):
+            duration = round((perf_counter() - stage_started) * 1000, 2)
+            stage_timings.append({"stage": stage, "duration_ms": duration})
+            if event_sink:
+                event_sink(stage, {"status": "completed", "duration_ms": duration})
         try:
+            stage_started = begin_stage("query_analysis")
             plan = self._build_plan(query)
+            complete_stage("query_analysis", stage_started)
             records = list(evidence)
+            stage_started = begin_stage("judge")
             analysis = self._evidence_analyzer.analyze(records, plan)
             grade = self._get_judge().judge(plan, list(candidates))
+            complete_stage("judge", stage_started)
             gaps = list(dict.fromkeys(
                 analysis["evidence_gaps"] + list(grade.missing_concepts)
                 + list(grade.missing_subquestions) + list(grade.conflicts)
             ))
             synthesizer = self._get_synthesizer()
+            stage_started = begin_stage("synthesize")
             synthesis = synthesizer.synthesize(
                 query, records, gaps, insufficient=grade.grade != "SUFFICIENT"
             )
+            complete_stage("synthesize", stage_started)
+            stage_started = begin_stage("validate")
             text = synthesis.text
             validator = getattr(synthesizer, "validator", None)
             audit = validator.validate(text, records) if validator is not None else synthesis.audit
@@ -1193,7 +1214,7 @@ class ResearchService:
                     query, records, gaps, grade.grade != "SUFFICIENT"
                 )
                 audit = validator.validate(text, records)
-            if audit.valid and semantic is not None and bool(getattr(semantic, "available", True)) and records:
+            if audit.valid and semantic is not None and bool(getattr(semantic, "available", True)) and records and not synthesizer._is_exact_span_text(text, records):
                 verdicts = semantic.verify(text, records)
                 expected = len(_claims(text))
                 if len(verdicts) != expected or not all(item.supported for item in verdicts):
@@ -1213,7 +1234,7 @@ class ResearchService:
                 text = "The available evidence could not be validated for a safe research answer."
                 records = []
                 audit = validator.validate(text, []) if validator is not None else synthesis.audit
-            if grade.grade == "SUFFICIENT" and audit.valid and audit.cited_pmids:
+            if grade.grade == "SUFFICIENT" and not gaps and audit.valid and audit.cited_pmids:
                 status = AnswerStatus.SUPPORTED
             elif audit.valid and audit.cited_pmids and analysis["consensus_level"] != "conflicting" and not grade.conflicts:
                 status = AnswerStatus.LIMITED
@@ -1231,6 +1252,7 @@ class ResearchService:
                         "The available evidence is insufficient to provide a validated research answer."
                     )
                     audit = validator.validate(text, []) if validator is not None else synthesis.audit
+            complete_stage("validate", stage_started)
             if event_sink:
                 released_claims = len(_claims(text)) if status in {AnswerStatus.SUPPORTED, AnswerStatus.LIMITED} else 0
                 event_sink("claim_verified", {"claim_count": released_claims, "supported_count": released_claims})
@@ -1252,6 +1274,19 @@ class ResearchService:
             )
             if event_sink:
                 event_sink("answer_released", {"status": status.value, "claim_count": len(audit.cited_pmids), "gap_count": len(response.evidence_gaps)})
+            with self._trace_lock:
+                self._traces[request_id] = {
+                    "request_id": request_id, "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "original_query": query, "query_plan": plan.model_dump(mode="json"),
+                    "execution_mode": "prior_evidence", "retrieval_iterations": [],
+                    "final_evidence_pmids": [record.pmid for record in records],
+                    "synthesis_metadata": {"mode": synthesis.mode, "fallback_reason": synthesis.fallback_reason, "timings_ms": getattr(synthesis, "timings_ms", {})},
+                    "timings_ms": {"total": round((perf_counter() - started) * 1000, 2), "stages": stage_timings},
+                    "citation_audit": audit.to_dict(),
+                }
+                self._traces.move_to_end(request_id)
+                while len(self._traces) > int(getattr(self.settings, "TRACE_MAX_ENTRIES", 500)):
+                    self._traces.popitem(last=False)
             return response
         except Exception:
             if event_sink:

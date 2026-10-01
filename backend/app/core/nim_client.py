@@ -31,8 +31,9 @@ def llm_time_remaining() -> float | None:
     return None if deadline is None or deadline["deadline"] is None else max(0.0, deadline["deadline"] - monotonic())
 
 
-def structured_completion_options(settings: Any) -> dict:
-    timeout = min(float(getattr(settings, "LLM_TIMEOUT_SECONDS", 30)), float(getattr(settings, "LLM_STRUCTURED_TIMEOUT_SECONDS", 10)))
+def structured_completion_options(settings: Any, *, timeout_seconds: float | None = None) -> dict:
+    call_timeout = float(getattr(settings, "LLM_STRUCTURED_TIMEOUT_SECONDS", 10)) if timeout_seconds is None else float(timeout_seconds)
+    timeout = min(float(getattr(settings, "LLM_TIMEOUT_SECONDS", 30)), call_timeout)
     scope = _request_deadline.get()
     if scope is not None and scope["deadline"] is None:
         # Cold model/index loading precedes provider waiting; do not consume

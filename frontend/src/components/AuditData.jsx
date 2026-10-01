@@ -1,3 +1,6 @@
+import { auditDate, auditDuration } from '../auditPresentation.js';
+import { normalizeTraceIteration } from '../auditTrace.js';
+
 function labelFor(key) {
   return key.replace(/_/g, " ").replace(/\b\w/g, character => character.toUpperCase());
 }
@@ -13,11 +16,12 @@ function formatValue(value) {
 const EVENT_LABELS = {
   action: "Action", complexity_hint: "Complexity hint", accepted: "Accepted", iteration: "Iteration",
   route_floor: "Route floor", rewrite_applied: "Rewrite applied", route: "Route", rule_route: "Rule route",
-  agent_complexity_hint: "Agent complexity hint", status: "Status", duration_ms: "Duration ms",
+  agent_complexity_hint: "Agent complexity hint", status: "Status", duration_ms: "Duration",
   candidate_count: "Candidate count", grade: "Grade", missing_count: "Missing concepts",
   conflict_count: "Conflicts", stop_reason: "Stop reason", reason: "Reason", claim_count: "Claims",
   supported_count: "Supported claims", unsupported_count: "Unsupported claims", gap_count: "Evidence gaps",
   evidence_count: "Evidence records",
+  preserved_claims: "Preserved claims", repaired_claims: "Repaired claims", pruned_claims: "Pruned claims", attempt_count: "Repair attempts", referenced_turn_count: "Referenced turns",
 };
 
 function eventSummary(payload = {}) {
@@ -31,23 +35,27 @@ export function Facts({ title, value, empty = "No information recorded" }) {
 
 export function Timeline({ events = [], stages = [] }) {
   const items = events.length ? events.map(item => ({ stage: item.stage, timestamp: item.timestamp, payload: item.payload })) : stages.map(item => ({ stage: item.stage || item.name || "Workflow stage", payload: item }));
-  return <section className="panel audit-timeline"><h2>Workflow timeline</h2>{items.length ? <ol>{items.map((item, index) => <li key={index}><span className="timeline-marker">{String(index + 1).padStart(2, "0")}</span><div><h3>{labelFor(item.stage || "Stage")}</h3>{item.timestamp && <time>{new Date(item.timestamp).toLocaleString()}</time>}<dl>{eventSummary(item.payload).map(([key, value]) => <div key={key}><dt>{EVENT_LABELS[key]}</dt><dd>{formatValue(value)}</dd></div>)}</dl></div></li>)}</ol> : <p className="audit-empty">No workflow events were captured for this run.</p>}</section>;
+  return <section className="panel audit-timeline"><h2>Workflow timeline</h2>{items.length ? <ol>{items.map((item, index) => <li key={index}><span className="timeline-marker">{String(index + 1).padStart(2, "0")}</span><div><h3>{labelFor(item.stage || "Stage")}</h3><time dateTime={item.timestamp || undefined}>{auditDate(item.timestamp)}</time><dl>{eventSummary(item.payload).map(([key, value]) => <div key={key}><dt>{EVENT_LABELS[key]}</dt><dd>{key === 'duration_ms' ? auditDuration(value) : formatValue(value)}</dd></div>)}</dl></div></li>)}</ol> : <p className="audit-empty">No workflow events were captured for this run.</p>}</section>;
 }
 
-const PHASES = [
-  { title: "Agent decision", stages: ["agent_decision"] },
-  { title: "Query enhanced", stages: ["query_enhanced"] },
-  { title: "Route arbitrated", stages: ["route_arbitrated", "query_analysis"] },
-  { title: "Retrieval/Judge loop", stages: ["retrieval_attempt", "retrieve", "judge", "evidence_judged", "correct", "correction_stopped"] },
-  { title: "Claim verification", stages: ["claim_verified", "semantic_verification"] },
-  { title: "Release", stages: ["answer_released"] },
-];
+export function ConversationTimeline({ events = [], mode, action }) {
+  return <><p className="panel audit-mode" role="status">{mode === 'prior_evidence' || action === 'ANSWER_FROM_EVIDENCE' ? 'Previous evidence reused: no new retrieval was performed. Only executed stages appear below.' : ['CLARIFY','ABSTAIN'].includes(action) ? 'This turn did not execute the research pipeline. Only recorded decision events appear below.' : 'Events are shown in recorded execution order, including repeated retrieval and correction attempts.'}</p><Timeline events={events} /></>;
+}
 
-export function ConversationTimeline({ events = [] }) {
-  return <section className="panel audit-timeline"><h2>Conversation phase timeline</h2><ol>{PHASES.map((phase, index) => {
-    const items = events.filter(event => phase.stages.includes(event.stage));
-    return <li key={phase.title}><span className="timeline-marker">{String(index + 1).padStart(2, "0")}</span><div><h3>{phase.title}</h3>{items.length ? items.map((item, itemIndex) => <div className="audit-phase-event" key={`${item.stage}-${itemIndex}`}><span>{labelFor(item.stage)}</span>{eventSummary(item.payload).map(([key, value]) => <span key={key}>{EVENT_LABELS[key]}: {formatValue(value)}</span>)}</div>) : <p className="audit-empty">No event recorded</p>}</div></li>;
-  })}</ol></section>;
+export function AuditGeneration({ run }) {
+  const trace = run.trace && Object.keys(run.trace).length && run.trace_availability !== 'not_recorded' ? run.trace : null;
+  const timings = trace?.timings_ms?.stages || Object.entries(run.stage_durations_ms || {}).map(([stage,duration_ms]) => ({stage,duration_ms}));
+  return <>
+    {!trace && <p className="panel detail-warning" role="status">Detailed trace snapshot was not retained for this run. The stored events and response remain available; missing details are not reconstructed.</p>}
+    <div className="detail-grid"><Facts title="Request times" value={{started:auditDate(run.started_at),finished:auditDate(run.finished_at),request_duration:auditDuration(run.duration_ms),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone}} />
+      <Facts title="Answer generation" value={trace ? {execution_mode:trace.execution_mode || 'Not recorded',synthesis_mode:trace.synthesis_metadata?.mode || 'Not recorded',fallback_used:trace.synthesis_metadata?.fallback_used ?? 'Not recorded',stop_reason:trace.stop_reason || 'Not recorded',workflow_duration:auditDuration(trace.timings_ms?.total),generation_duration:auditDuration(trace.synthesis_metadata?.timings_ms?.generation)} : null} empty="Generation metadata was not retained" /></div>
+    {trace?.query_plan && <Facts title="Query processing" value={{original_query:trace.original_query,canonical_query:trace.query_plan.canonical_query,subqueries:trace.query_plan.subqueries}} />}
+    <section className="panel audit-facts"><h2>Stage timings</h2>{timings.length ? <dl>{timings.map((item,index) => <div key={index}><dt>{labelFor(item.stage)}{item.iteration != null ? ` · attempt ${item.iteration + 1}` : ''}</dt><dd>{auditDuration(item.duration_ms)}</dd></div>)}</dl> : <p className="audit-empty">Stage durations were not recorded for this run.</p>}</section>
+    {(trace?.retrieval_iterations || []).map((raw,index) => {
+      const item = normalizeTraceIteration(raw);
+      return <Facts key={index} title={`Retrieval attempt ${(item.iteration ?? index) + 1}`} value={{queries:item.queries,channels:item.channels,candidate_count:item.pmids.length,candidate_pmids:item.pmids,grade:item.grade || 'Not recorded'}} />;
+    })}
+  </>;
 }
 
 export function EvidenceSnapshot({ response }) {

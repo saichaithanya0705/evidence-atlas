@@ -27,6 +27,7 @@ _EVENT_FIELDS = {
     "synthesize": {"status", "duration_ms"},
     "validate": {"status", "duration_ms"},
     "done": {"status", "duration_ms", "stop_reason"},
+    "followup_evidence_unavailable": {"action", "referenced_turn_count"},
 }
 _RESPONSE_FIELDS = {"request_id", "query", "synthesis", "cited_pmids", "evidence_gaps", "evidence_table", "retrieved_papers", "citations_valid", "citation_precision", "consensus_level", "route", "answer_status"}
 _TRACE_FIELDS = {"valid", "citations_valid", "precision", "citation_precision", "cited_pmids", "invalid_pmids"}
@@ -41,7 +42,7 @@ _STOP_REASONS = {
     "correction_rejected_below_route_floor", "correction_stalled",
     "citation_validation_failed_fail_closed", "completed",
 }
-_GRADES = {"SUFFICIENT", "INSUFFICIENT"}
+_GRADES = {"SUFFICIENT", "PARTIAL", "INSUFFICIENT"}
 
 
 def _json(value):
@@ -88,6 +89,28 @@ def _safe_controls(value):
     study_types = source.get("study_types")
     if isinstance(study_types, list):
         result["study_types"] = _safe_string_list(study_types, limit=20, item_limit=80)
+    return result
+
+
+def _safe_timings(value):
+    if not isinstance(value, dict):
+        return {}
+    result = {key: item for key, item in value.items()
+              if key in _TIMING_FIELDS | {"generation", "validation_and_fallback"}
+              and type(item) in {int, float} and math.isfinite(item) and item >= 0}
+    if isinstance(value.get("stages"), list):
+        stages = []
+        for item in value["stages"][:100]:
+            if not isinstance(item, dict) or item.get("stage") not in _EVENT_FIELDS:
+                continue
+            duration = item.get("duration_ms")
+            if type(duration) not in {int, float} or not math.isfinite(duration) or duration < 0:
+                continue
+            row = {"stage": item["stage"], "duration_ms": duration}
+            if type(item.get("iteration")) is int and 0 <= item["iteration"] <= 100:
+                row["iteration"] = item["iteration"]
+            stages.append(row)
+        result["stages"] = stages
     return result
 
 
@@ -224,15 +247,72 @@ def _safe_trace(value):
     if not isinstance(value, dict):
         return None
     result = {}
+    for key, limit in (("request_id", 100), ("timestamp", 80), ("original_query", 4000)):
+        if (text := _safe_text(value.get(key), limit)) is not None:
+            result[key] = text
+    plan = value.get("query_plan")
+    if isinstance(plan, dict):
+        result["query_plan"] = {}
+        if (text := _safe_text(plan.get("canonical_query"), 4000)) is not None:
+            result["query_plan"]["canonical_query"] = text
+        if plan.get("route") in _ROUTES:
+            result["query_plan"]["route"] = plan["route"]
+        result["query_plan"]["subqueries"] = _safe_string_list(plan.get("subqueries"), limit=8, item_limit=4000)
+    if value.get("stop_reason") in _STOP_REASONS | {"latency_budget_reserved_for_validation"}:
+        result["stop_reason"] = value["stop_reason"]
+    if value.get("execution_mode") in {"research", "prior_evidence"}:
+        result["execution_mode"] = value["execution_mode"]
+    for key in ("final_evidence_pmids", "cited_pmids"):
+        if key in value:
+            result[key] = _safe_pmids(value[key])
+    if isinstance(value.get("retrieval_iterations"), list):
+        result["retrieval_iterations"] = []
+        for item in value["retrieval_iterations"][:10]:
+            if not isinstance(item, dict):
+                continue
+            entry = {}
+            if type(item.get("iteration")) is int and 0 <= item["iteration"] <= 100:
+                entry["iteration"] = item["iteration"]
+            if (text := _safe_text(item.get("query"), 4000)) is not None:
+                entry["query"] = text
+            for key in ("candidate_pmids", "accumulated_pmids"):
+                entry[key] = _safe_pmids(item.get(key))
+            query_plan = item.get("query_plan")
+            if isinstance(query_plan, dict):
+                entry["query_plan"] = {"subqueries": _safe_string_list(query_plan.get("subqueries"), limit=8, item_limit=4000)}
+            retrieval = item.get("retrieval")
+            channels = retrieval.get("channels") if isinstance(retrieval, dict) else None
+            if isinstance(channels, dict):
+                entry["retrieval"] = {"channels": {
+                    name: {key: count for key in ("returned", "accepted")
+                           if type(count := details.get(key)) is int and count >= 0}
+                    for name, details in list(channels.items())[:20]
+                    if isinstance(name, str) and re.fullmatch(r"(?:dense|bm25)(?:_original|_canonical|_(?:subquery|query)_\d+)?|mesh_graph", name)
+                    and isinstance(details, dict)
+                }}
+            grade = item.get("grade")
+            if isinstance(grade, dict) and grade.get("grade") in _GRADES:
+                entry["grade"] = {"grade": grade["grade"]}
+            result["retrieval_iterations"].append(entry)
+    synthesis = value.get("synthesis_metadata")
+    if isinstance(synthesis, dict):
+        result["synthesis_metadata"] = {}
+        if synthesis.get("mode") in {"nvidia_nim", "deterministic_spans", "extract_only", "deterministic", "mock"}:
+            result["synthesis_metadata"]["mode"] = synthesis["mode"]
+        result["synthesis_metadata"]["fallback_used"] = bool(synthesis.get("fallback_reason"))
+        if type(synthesis.get("insufficient_evidence")) is bool:
+            result["synthesis_metadata"]["insufficient_evidence"] = synthesis["insufficient_evidence"]
+        if isinstance(synthesis.get("timings_ms"), dict):
+            result["synthesis_metadata"]["timings_ms"] = _safe_timings(synthesis["timings_ms"])
+    if isinstance(value.get("stages"), list):
+        result["stages"] = [event for item in value["stages"][:100] if isinstance(item, dict)
+                            and (event := _safe_event({"stage": item.get("stage"), "payload": item})) is not None]
     citation_audit = value.get("citation_audit")
     if isinstance(citation_audit, dict):
         result["citation_audit"] = _safe_citation_audit(citation_audit)
     timings = value.get("timings_ms")
     if isinstance(timings, dict):
-        result["timings_ms"] = {
-            key: item for key, item in timings.items()
-            if key in _TIMING_FIELDS and isinstance(item, (int, float)) and math.isfinite(item)
-        }
+        result["timings_ms"] = _safe_timings(timings)
     return result
 
 
@@ -251,7 +331,7 @@ def _safe_event(event):
         "stop_reason": _STOP_REASONS, "reason": _STOP_REASONS,
     }
     boolean_fields = {"accepted", "rewrite_applied"}
-    integer_fields = {"iteration", "candidate_count", "missing_count", "conflict_count", "claim_count", "supported_count", "unsupported_count", "gap_count", "evidence_count", "preserved_claims", "repaired_claims", "pruned_claims", "attempt_count"}
+    integer_fields = {"iteration", "candidate_count", "missing_count", "conflict_count", "claim_count", "supported_count", "unsupported_count", "gap_count", "evidence_count", "preserved_claims", "repaired_claims", "pruned_claims", "attempt_count", "referenced_turn_count"}
     for key in allowed:
         item = source.get(key)
         if key in enum_fields and isinstance(item, str) and item in enum_fields[key]:
@@ -286,10 +366,11 @@ def _admin_projection(row, events, response, trace):
     route_events = [event["payload"] for event in safe_events if event["stage"] == "route_arbitrated"]
     released = by_stage.get("answer_released", {})
     correction_count = min(100, sum(event["stage"] == "correct" and event["payload"].get("status") == "completed" for event in safe_events))
-    durations = {
-        event["stage"]: event["payload"]["duration_ms"]
-        for event in safe_events if isinstance(event["payload"].get("duration_ms"), (int, float))
-    }
+    durations = {}
+    for event in safe_events:
+        duration = event["payload"].get("duration_ms")
+        if type(duration) in {int, float}:
+            durations[event["stage"]] = round(durations.get(event["stage"], 0) + duration, 2)
     projected = {
         key: row.get(key) for key in (
             "id", "username", "role", "operation", "query", "status", "started_at",
@@ -303,13 +384,14 @@ def _admin_projection(row, events, response, trace):
         "agent_action": agent_event.get("action"),
         "agent_complexity_hint": agent_event.get("complexity_hint") or analysis.get("agent_complexity_hint"),
         "rule_route": analysis.get("rule_route"),
-        "final_route": (route_events[-1].get("route") if route_events else None) or analysis.get("route") or (response or {}).get("route"),
+        "final_route": (route_events[-1].get("route") if route_events else None) or analysis.get("route") or (response or {}).get("route") or ((trace or {}).get("query_plan") or {}).get("route"),
         "answer_status": (response or {}).get("answer_status") or released.get("status"),
         "correction_count": correction_count,
         "evidence_gaps": _safe_gaps((response or {}).get("evidence_gaps")),
         "stage_durations_ms": durations,
         "response": response,
         "trace": trace,
+        "trace_availability": "recorded" if trace else "not_recorded",
         "events": safe_events,
     })
     return projected

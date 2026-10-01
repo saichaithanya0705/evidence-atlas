@@ -92,6 +92,11 @@ class EvidenceSufficiencyJudge:
 
     @staticmethod
     def _appears(concept: str, text: str) -> bool:
+        # Query expansion must not make the source's equivalent acronym absent.
+        # Keep the coverage threshold intact and normalize only this known alias.
+        alias = r"\b(?:messenger ribonucleic acid|messenger RNA|mRNA)\b"
+        concept = re.sub(alias, "mRNA", concept, flags=re.IGNORECASE)
+        text = re.sub(alias, "mRNA", text, flags=re.IGNORECASE)
         concept_tokens = set(tokenize_biomedical_text(concept))
         content_tokens = set(tokenize_biomedical_text(text))
         if not concept_tokens:

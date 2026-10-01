@@ -8,6 +8,7 @@ writes the CSV schema consumed by the project's normal indexing pipeline.
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
 import hashlib
 import html
@@ -29,6 +30,7 @@ from xml.etree import ElementTree as ET
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EUROPE_PMC_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 NCBI_SOURCE = "NCBI PubMed E-utilities"
 EUROPE_PMC_SOURCE = "Europe PMC REST API"
@@ -37,6 +39,28 @@ FIELDS = [
     "publication_date_raw", "year", "study_type", "publication_types",
     "mesh_terms", "keywords", "doi",
 ]
+
+BROAD_MEDICAL_QUERIES = {
+    "mrna_vaccines_respiratory_2020_plus": (
+        '("mRNA vaccine"[Title/Abstract] OR "messenger RNA vaccine"[Title/Abstract]) '
+        'AND ("Respiratory Tract Infections"[Mesh] OR COVID-19[Mesh] OR respiratory[Title/Abstract]) '
+        'AND ("2020/01/01"[Date - Publication] : "3000"[Date - Publication])'
+    ),
+    "diabetes_cardiovascular_2020_plus": (
+        '("Diabetes Mellitus"[Mesh] OR diabetes[Title/Abstract]) '
+        'AND ("Cardiovascular Diseases"[Mesh] OR cardiovascular[Title/Abstract]) '
+        'AND ("2020/01/01"[Date - Publication] : "3000"[Date - Publication])'
+    ),
+    "chronic_kidney_disease_sglt2": (
+        '("Renal Insufficiency, Chronic"[Mesh] OR "chronic kidney disease"[Title/Abstract]) '
+        'AND ("Sodium-Glucose Transporter 2 Inhibitors"[Mesh] OR "SGLT2 inhibitor"[Title/Abstract])'
+    ),
+    "comparative_treatments_2020_plus": (
+        '("Comparative Effectiveness Research"[Mesh] OR "comparative effectiveness"[Title/Abstract] '
+        'OR "treatment comparison"[Title/Abstract]) '
+        'AND ("2020/01/01"[Date - Publication] : "3000"[Date - Publication])'
+    ),
+}
 
 
 def _get_ssl_context() -> ssl.SSLContext:
@@ -104,6 +128,54 @@ def select_pmids(mapping: dict[str, list[str]], limit: int) -> list[str]:
             if len(selected) >= limit:
                 return selected
     return selected[:limit]
+
+
+def select_pmids_balanced(mapping: dict[str, list[str]], limit: int) -> list[str]:
+    """Round-robin PMID lists so each retrieval seed retains representation."""
+    selected: list[str] = []
+    seen: set[str] = set()
+    max_length = max((len(values) for values in mapping.values()), default=0)
+    for index in range(max_length):
+        for values in mapping.values():
+            if index >= len(values):
+                continue
+            pmid = values[index]
+            if pmid in seen:
+                continue
+            selected.append(pmid)
+            seen.add(pmid)
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def search_pubmed_pmids(query: str, limit: int, email: str = "", attempts: int = 4) -> list[str]:
+    """Resolve a PubMed query to PMIDs through NCBI ESearch with verified TLS."""
+    params = {
+        "db": "pubmed",
+        "term": query,
+        "retmode": "xml",
+        "retmax": str(limit),
+        "sort": "pub date",
+        "tool": "evidence-atlas-capstone",
+    }
+    if email:
+        params["email"] = email
+    request = Request(
+        ESEARCH_URL + "?" + urlencode(params),
+        headers={"User-Agent": "EvidenceAtlasCapstone/1.0"},
+    )
+    context = _get_ssl_context()
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=90, context=context) as response:
+                root = ET.fromstring(response.read())
+                return [node.text for node in root.findall(".//IdList/Id") if node.text and node.text.isdigit()]
+        except Exception:
+            if attempt == attempts:
+                raise
+            time.sleep(min(8.0, 0.75 * (2 ** (attempt - 1))))
+    raise RuntimeError("PubMed search request exhausted its retry budget")
 
 
 def fetch_pubmed_xml(pmids: list[str], email: str = "", attempts: int = 4) -> bytes:
@@ -306,6 +378,37 @@ def _selection_sha256(pmids: list[str]) -> str:
     return hashlib.sha256("\n".join(pmids).encode("ascii")).hexdigest()
 
 
+def release_ingestion_run_lock(handle) -> None:
+    handle.close()
+
+
+def acquire_ingestion_run_lock(output: Path):
+    """Reserve one output target so concurrent extractors cannot share a checkpoint."""
+    lock_path = output.with_suffix(".ingestion.lock")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    handle.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise RuntimeError(f"PubMed ingestion is already running for {output}") from exc
+    # Closing the descriptor or terminating its process releases the OS lock.
+    # Keep the file itself to avoid unlink/recreate races between processes.
+    return handle
+
+
 def append_checkpoint_batch(
     checkpoint: Path,
     selected_pmids: list[str],
@@ -343,7 +446,13 @@ def load_ingestion_checkpoint(
                 break
             if entry.get("selection_sha256") != expected_hash:
                 return [], set(), NCBI_SOURCE
-            completed.update(map(str, entry.get("requested_pmids", [])))
+            requested_pmids = [str(pmid) for pmid in entry.get("requested_pmids", [])]
+            if any(pmid in completed for pmid in requested_pmids):
+                # A second process can only create an overlapping batch.  Ignore
+                # it during recovery so duplicate checkpoint lines cannot inflate
+                # the corpus or cause another re-fetch of completed PMIDs.
+                continue
+            completed.update(requested_pmids)
             records.extend(entry.get("records", []))
             source = str(entry.get("source") or source)
     return records, completed, source
@@ -352,20 +461,48 @@ def load_ingestion_checkpoint(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, default=PROJECT_ROOT / "PubMed_Phrases.tar.gz")
+    parser.add_argument("--profile", choices=("archive", "broad-medical"), default="archive")
     parser.add_argument("--phrase", action="append", dest="phrases")
+    parser.add_argument("--query", action="append", dest="queries")
     parser.add_argument("--limit", type=int, default=250)
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "data/raw/pubmed_sample.csv")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--email", default=os.getenv("NCBI_EMAIL", ""))
     args = parser.parse_args()
-    phrases = args.phrases or ["sglt2 inhibitor", "chronic kidney disease"]
     if not 1 <= args.limit <= 100_000:
         raise ValueError("--limit must be between 1 and 100000")
-    if not args.archive.is_file():
-        raise FileNotFoundError(args.archive)
 
-    mapping = phrase_pmids(args.archive, phrases)
-    selected = select_pmids(mapping, args.limit)
+    phrase_mapping: dict[str, list[str]] = {}
+    phrases: list[str] = []
+    if args.profile == "archive" or args.phrases:
+        phrases = args.phrases or ["sglt2 inhibitor", "chronic kidney disease"]
+        if not args.archive.is_file():
+            raise FileNotFoundError(args.archive)
+        phrase_mapping = phrase_pmids(args.archive, phrases)
+
+    query_mapping: dict[str, list[str]] = {}
+    configured_queries: dict[str, str] = {}
+    if args.profile == "broad-medical":
+        configured_queries.update(BROAD_MEDICAL_QUERIES)
+    for index, query in enumerate(args.queries or [], start=1):
+        configured_queries[f"custom_query_{index}"] = query
+    if configured_queries:
+        per_seed_limit = min(args.limit, max(1_000, (args.limit + len(configured_queries) - 1) // len(configured_queries) * 2))
+        for label, query in configured_queries.items():
+            pmids = search_pubmed_pmids(query, limit=per_seed_limit, email=args.email)
+            if not pmids:
+                print(f"PubMed search returned no PMIDs for {label}; continuing with other seeds.", flush=True)
+                continue
+            query_mapping[label] = pmids
+            print(f"PubMed search returned {len(pmids)} PMIDs for {label}.", flush=True)
+            time.sleep(0.4)
+
+    seed_mapping = {**phrase_mapping, **query_mapping}
+    if not seed_mapping:
+        raise RuntimeError("No phrase archive or PubMed search seed produced PMIDs")
+    selected = select_pmids_balanced(seed_mapping, args.limit)
+    lock_path = acquire_ingestion_run_lock(args.output)
+    atexit.register(release_ingestion_run_lock, lock_path)
     checkpoint_path = args.output.with_suffix(".ingestion_checkpoint.jsonl")
     records, completed_pmids, record_source = load_ingestion_checkpoint(checkpoint_path, selected)
     if completed_pmids:
@@ -425,10 +562,14 @@ def main() -> int:
         "source": record_source,
         "source_url": EUROPE_PMC_URL if record_source == EUROPE_PMC_SOURCE else EFETCH_URL,
         "upstream_corpus": "PubMed/MEDLINE",
-        "phrase_archive": str(args.archive.resolve()),
-        "phrase_archive_sha256": sha256_file(args.archive),
+        "selection_strategy": "balanced round-robin across phrase and query seeds",
+        "profile": args.profile,
+        "phrase_archive": str(args.archive.resolve()) if phrase_mapping else None,
+        "phrase_archive_sha256": sha256_file(args.archive) if phrase_mapping else None,
         "phrases": phrases,
-        "phrase_match_counts": {key: len(value) for key, value in mapping.items()},
+        "phrase_match_counts": {key: len(value) for key, value in phrase_mapping.items()},
+        "search_queries": configured_queries,
+        "search_match_counts": {key: len(value) for key, value in query_mapping.items()},
         "requested_pmids": len(selected),
         "usable_abstract_records": len(records),
         "unusable_or_missing_records": len(selected) - len(records),
@@ -443,6 +584,8 @@ def main() -> int:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     checkpoint_path.unlink(missing_ok=True)
+    release_ingestion_run_lock(lock_path)
+    atexit.unregister(release_ingestion_run_lock)
     print(json.dumps(manifest, indent=2))
     return 0
 

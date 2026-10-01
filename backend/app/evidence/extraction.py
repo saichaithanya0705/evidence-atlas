@@ -19,6 +19,14 @@ _LIMITATION_MARKERS = (
     "cannot establish", "did not assess", "further studies", "single-center",
 )
 _FINDING_MARKERS = ("results:", "conclusion:", "conclusions:", "in this study", "we found", "was associated", "reduced", "increased", "improved", "no significant")
+_RESULT_SECTION_MARKERS = ("results:", "result:", "conclusion:", "conclusions:", "recent findings:")
+_LOW_VALUE_SECTION_MARKERS = ("background:", "objective:", "objectives:", "aim:", "aims:", "methods:", "method:")
+_OUTCOME_MARKERS = (
+    "survival", "mortality", "hazard", "predictor", "predictors", "risk", "odds ratio",
+    "confidence interval", "associated", "endpoint", "outcome", "remission", "response",
+    "progression", "recurrence", "prevalence", "incidence", "sensitivity", "specificity",
+)
+_AIM_MARKERS = ("aimed to", "aim of", "objective was", "we sought", "we investigated", "was designed to")
 
 
 def _sentence_spans(text: str) -> List[str]:
@@ -52,15 +60,52 @@ def _terms(plan: QueryPlan) -> List[str]:
     return sorted(tokens)
 
 
-def _query_specificity_score(sentence: str, terms: Sequence[str]) -> float:
+def score_finding_sentence(sentence: str, terms: Sequence[str]) -> float:
+    """Score a source sentence for conservative, query-grounded extraction.
+
+    The score is deliberately extractive: it only orders existing sentences and
+    never supplies a claim absent from the source. Query overlap remains a hard
+    gate in the caller; structural and clinical signals decide which overlapping
+    sentence is most useful.
+    """
     tokens = set(tokenize_biomedical_text(sentence))
     if not tokens or not terms:
         return 0.0
-    overlap = len(tokens.intersection(terms))
-    # A small structural boost selects findings/conclusions only when they also
-    # share at least one query concept; abstract section labels alone are not evidence.
-    marker_boost = 0.15 if any(marker in sentence.casefold() for marker in _FINDING_MARKERS) else 0.0
-    return overlap / max(1, min(len(terms), 8)) + marker_boost
+    term_set = set(terms)
+    overlap = len(tokens.intersection(term_set))
+    if not overlap:
+        return 0.0
+
+    folded = sentence.casefold()
+    # Questions and stated objectives are not observations, even at high overlap.
+    if folded.rstrip().endswith("?") or folded.startswith("clinical question:"):
+        return 0.0
+    # Reward query coverage, but cap the denominator so long expanded queries do
+    # not make every sentence look equally weak.
+    score = (overlap / max(1, min(len(term_set), 8))) + (0.12 * min(overlap, 5))
+    if any(marker in folded for marker in _RESULT_SECTION_MARKERS):
+        score += 1.35
+    elif any(marker in folded for marker in _FINDING_MARKERS):
+        score += 0.25
+    if any(marker in folded for marker in _LOW_VALUE_SECTION_MARKERS):
+        score -= 0.45
+    if any(marker in folded for marker in _AIM_MARKERS):
+        score -= 0.25
+
+    outcome_hits = sum(marker in folded for marker in _OUTCOME_MARKERS)
+    if re.search(r"\b(?:demonstrat\w*|show\w*|found|reduc\w*|improv\w*)\b.{0,100}\b(?:effectiveness|efficacy|protection|protective|severe|death|mortality)\b", folded):
+        score += 1.0
+    score += min(0.6, 0.2 * outcome_hits)
+    # Numbers matter when they describe an outcome or association. A bare year
+    # or sample size in an unrelated sentence receives no special treatment.
+    if re.search(r"\d", sentence) and outcome_hits:
+        score += 0.3
+    return max(0.0, score)
+
+
+def _query_specificity_score(sentence: str, terms: Sequence[str]) -> float:
+    """Backward-compatible scorer name used by existing callers and tests."""
+    return score_finding_sentence(sentence, terms)
 
 
 def _field_if_verbatim(value: Optional[str], spans: Sequence[str]) -> Optional[str]:
@@ -80,6 +125,8 @@ def _controlled_source_alias(value: Optional[str], spans: Sequence[str]) -> Opti
         patterns.append(r"\bGLP-?1\s+(?:receptor\s+)?agonists?\b")
     if "sodium-glucose cotransporter-2" in desired:
         patterns.append(r"\bSGLT-?2\s+inhibitors?\b")
+    if re.fullmatch(r"(?:messenger ribonucleic acid|messenger rna|mrna) vaccines?", desired):
+        patterns.append(r"\b(?:mRNA|messenger RNA|messenger ribonucleic acid)\s+vaccines?\b")
     for span in spans:
         for pattern in patterns:
             match = re.search(pattern, span, re.IGNORECASE)
@@ -98,7 +145,21 @@ class EvidenceExtractor:
         abstract = candidate.abstract or ""
         sentences = _sentence_spans(abstract)
         terms = _terms(plan)
-        scored = [(_query_specificity_score(sentence, terms), index, sentence) for index, sentence in enumerate(sentences)]
+        scored = []
+        section = None
+        for index, sentence in enumerate(sentences):
+            label = re.match(r"^(BACKGROUND|OBJECTIVES?|AIMS?|METHODS?|RESULTS?|CONCLUSIONS?|SUMMARY):", sentence, re.IGNORECASE)
+            if label:
+                section = label.group(1).casefold()
+            score = score_finding_sentence(sentence, terms)
+            if score > 0:
+                # Structured abstract headings apply to following sentences too.
+                # A result need not repeat the disease name to outrank its aim.
+                if section in {"result", "results"}:
+                    score += 0.5
+                elif section in {"background", "method", "methods", "aim", "aims", "objective", "objectives"}:
+                    score = max(0.0, score - 0.2)
+            scored.append((score, index, sentence))
         relevant = [item for item in scored if item[0] > 0]
         if relevant:
             # Keep the highest-value spans while restoring source order so the
@@ -201,7 +262,7 @@ class EvidenceAnalyzer:
             gaps.append("The retrieved evidence contains fewer than two studies for cross-study comparison.")
         for label, value in (("population", getattr(pico, "population", None)), ("intervention", getattr(pico, "intervention", None)), ("comparator", getattr(pico, "comparator", None)), ("outcome", getattr(pico, "outcome", None))):
             if value and not any(getattr(record, label, None) for record in records):
-                gaps.append(f"The abstracts do not explicitly report the requested {label}.")
+                gaps.append(f"Could not confirm the requested {label} in the selected passages.")
         if any(not record.supporting_text_spans for record in records):
             gaps.append("One or more records lack a query-relevant supporting abstract span.")
         return {"groups": groups, "consensus_level": consensus, "evidence_gaps": gaps}

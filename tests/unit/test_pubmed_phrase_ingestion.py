@@ -25,6 +25,51 @@ def test_select_pmids_never_exceeds_limit_when_intersection_is_large():
     assert selected == ["1", "2"]
 
 
+def test_balanced_selection_reserves_capacity_for_each_phrase():
+    mapping = {
+        "chronic kidney disease": ["1", "2", "3", "4"],
+        "mrna vaccine": ["4", "5", "6", "7"],
+    }
+
+    selected = ingestion.select_pmids_balanced(mapping, limit=4)
+
+    assert selected == ["1", "4", "2", "5"]
+    assert set(selected) & {"1", "2", "3"}
+    assert set(selected) & {"5", "6", "7"}
+
+
+def test_search_pubmed_pmids_uses_auditable_search_parameters(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"<eSearchResult><IdList><Id>101</Id><Id>202</Id></IdList></eSearchResult>"
+
+    def fake_urlopen(request, *, timeout, context):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return Response()
+
+    monkeypatch.setattr(ingestion, "urlopen", fake_urlopen)
+
+    pmids = ingestion.search_pubmed_pmids("mRNA vaccine", limit=2, email="researcher@example.test")
+
+    assert pmids == ["101", "202"]
+    assert "db=pubmed" in captured["url"]
+    assert "term=mRNA+vaccine" in captured["url"]
+    assert "retmax=2" in captured["url"]
+    assert "email=researcher%40example.test" in captured["url"]
+    assert captured["timeout"] == 90
+    assert captured["context"].verify_mode == ssl.CERT_REQUIRED
+
+
 def test_pubmed_ssl_context_always_requires_certificate_verification():
     context = ingestion._get_ssl_context()
 
@@ -151,6 +196,31 @@ def test_ingestion_checkpoint_restores_completed_batches(tmp_path):
     assert records == batch_records
     assert completed == {"1", "2"}
     assert source == ingestion.EUROPE_PMC_SOURCE
+
+
+def test_ingestion_checkpoint_ignores_duplicate_completed_batches(tmp_path):
+    checkpoint = tmp_path / "ingestion.jsonl"
+    selected = ["1", "2"]
+    batch = [{"pmid": "1", "title": "First"}]
+
+    ingestion.append_checkpoint_batch(checkpoint, selected, ["1"], batch, ingestion.NCBI_SOURCE)
+    ingestion.append_checkpoint_batch(checkpoint, selected, ["1"], batch, ingestion.NCBI_SOURCE)
+
+    records, completed, _source = ingestion.load_ingestion_checkpoint(checkpoint, selected)
+
+    assert records == batch
+    assert completed == {"1"}
+
+
+def test_ingestion_run_lock_rejects_a_second_active_extractor(tmp_path):
+    output = tmp_path / "pubmed.csv"
+    lock = ingestion.acquire_ingestion_run_lock(output)
+
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            ingestion.acquire_ingestion_run_lock(output)
+    finally:
+        ingestion.release_ingestion_run_lock(lock)
 
 
 def test_europe_pmc_fetch_survives_extended_transient_outage(monkeypatch):

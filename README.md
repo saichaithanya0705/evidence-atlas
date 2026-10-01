@@ -13,7 +13,7 @@ Requirements: Windows 10 or 11, Python 3.10 or later (Python 3.11 is recommended
 
 Setup stages are safe to repeat. Existing `.env` and raw dataset files are preserved. A complete index with a matching processed-corpus hash is reused on normal startup; changed corpus files trigger rebuilding. `--ingest` always reindexes. Qdrant uses local embedded storage under `data/qdrant_storage`.
 
-To acquire original PubMed records from the root `PubMed_Phrases.tar.gz` before rebuilding, run `start.bat --ingest`. A normal `start.bat` deliberately reuses the existing dataset and does not redownload it. The archive supplies phrase-to-PMID mappings; `--ingest` then fetches canonical XML records from the official NCBI E-utilities API and writes the normalized CSV before indexing it. `PUBMED_INGEST_LIMIT` controls the requested upper bound (default `100000`; the archive can contain fewer unique PMIDs), for example `set PUBMED_INGEST_LIMIT=1000` followed by `start.bat --ingest` for a shorter CPU-only build. This online option cannot be combined with `--offline`.
+To acquire a current, balanced PubMed corpus before rebuilding, run `start.bat --ingest`. A normal `start.bat` deliberately reuses the existing dataset and does not redownload it. `--ingest` resolves maintained medical research queries through the official NCBI ESearch API, balances the resulting PMID lists across mRNA respiratory vaccines, diabetes/cardiovascular complications, chronic kidney disease/SGLT2, and comparative treatment studies, then fetches canonical XML through EFetch before indexing. `PUBMED_INGEST_LIMIT` controls the requested upper bound (default `100000`), for example `set PUBMED_INGEST_LIMIT=1000` followed by `start.bat --ingest` for a shorter CPU-only build. This online option cannot be combined with `--offline`. The older `PubMed_Phrases.tar.gz` archive remains available only for an explicitly requested archive-seeded ingestion command.
 
 For a deliberate model-offline run, use `start.bat --offline`. This never downloads MedCPT models and uses complete local model caches when available. If required weights are missing, the run is marked `degraded-offline` in `data/manifests/assets_manifest.json` and may use deterministic mock embeddings. That mode is only for software development; results are not MedCPT results. npm may still need registry access to install frontend packages.
 
@@ -112,6 +112,12 @@ The report includes Recall@10, Precision@10, MRR@10, nDCG@10, filter accuracy, l
 ## Development commands
 
 ```powershell
+# Start the existing backend and frontend without rebuilding the corpus
+powershell -ExecutionPolicy Bypass -File .\start-dev.ps1
+
+# Stop listeners on the local development ports
+powershell -ExecutionPolicy Bypass -File .\stop-dev.ps1
+
 # Run the API only (from the project root with .venv active)
 python -m uvicorn backend.app.main:app --reload
 

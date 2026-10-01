@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const sessionMemory = new Map();
-const emptyWorkspace = () => ({ isOpen: false, activeTabId: "overview", tabs: [{ id: "overview", type: "overview", title: "Overview" }], panelWidth: Math.min(520, Math.floor(window.innerWidth / 2)) });
+const emptyWorkspace = () => ({ isOpen: false, activeTabId: "overview", tabs: [{ id: "overview", type: "overview", title: "Overview" }], panelWidth: Math.min(520, Math.floor(window.innerWidth * .45)) });
 
 function normalizedPmid(value) {
   const digits = String(value ?? "").trim().replace(/^pmid:\s*/i, "").replace(/\s+/g, "");
@@ -56,10 +56,11 @@ export default function useEvidenceWorkspace(conversationId) {
   }), [update]);
   const activateTab = useCallback((id) => update(current => current.tabs.some(tab => tab.id === id) ? { ...current, activeTabId: id, isOpen: true } : current), [update]);
   const toggle = useCallback(() => update(current => ({ ...current, isOpen: !current.isOpen })), [update]);
+  const close = useCallback(() => update(current => ({ ...current, isOpen: false })), [update]);
   const setPanelWidth = useCallback((value) => update(current => {
-    const maximum = Math.min(760, Math.floor(window.innerWidth / 2));
+    const maximum = Math.min(760, Math.floor(window.innerWidth * .45));
     const requested = typeof value === "function" ? value(current.panelWidth) : value;
-    return { ...current, panelWidth: Math.min(maximum, Math.max(360, Number(requested) || current.panelWidth)) };
+    return { ...current, panelWidth: Math.min(maximum, Math.max(320, Number(requested) || current.panelWidth)) };
   }), [update]);
 
   useEffect(() => {
@@ -68,5 +69,5 @@ export default function useEvidenceWorkspace(conversationId) {
     return () => window.removeEventListener("evidence-workspace-toggle", handleToggle);
   }, [toggle]);
 
-  return useMemo(() => ({ ...workspace, openOverview, openPaper, closePaper, activateTab, toggle, setPanelWidth }), [workspace, openOverview, openPaper, closePaper, activateTab, toggle, setPanelWidth]);
+  return useMemo(() => ({ ...workspace, openOverview, openPaper, closePaper, activateTab, toggle, close, setPanelWidth }), [workspace, openOverview, openPaper, closePaper, activateTab, toggle, close, setPanelWidth]);
 }

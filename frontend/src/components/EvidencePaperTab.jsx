@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Icon from "./Icon.jsx";
 import { formatScore, formatValue, pubmedUrl } from "../utils.js";
+import { metadataText } from "../paperDetails.js";
 
 const channels = [
   { label: "Dense", keys: ["dense", "vector", "medcpt", "dense_similarity"] },
@@ -12,9 +13,22 @@ function readChannel(values, keys) {
   return entry?.[1];
 }
 
-export default function EvidencePaperTab({ tab }) {
-  const [errorDismissed, setErrorDismissed] = useState(false);
-  const paper = tab.paper || {};
+export default function EvidencePaperTab({ tab, loadPaperDetails }) {
+  const [details, setDetails] = useState({ status: "loading", metadata: null, errorStatus: null });
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const pmid = tab.paper?.pmid;
+  useEffect(() => {
+    let active = true;
+    setDetails({ status: "loading", metadata: null, errorStatus: null });
+    loadPaperDetails(pmid).then(metadata => {
+      if (active) setDetails({ status: "loaded", metadata, errorStatus: null });
+    }).catch(error => {
+      if (active) setDetails({ status: "error", metadata: null, errorStatus: error?.status });
+    });
+    // A late response must not replace metadata in a different selected tab.
+    return () => { active = false; };
+  }, [pmid, loadPaperDetails, retryAttempt]);
+  const paper = { ...(tab.paper || {}), ...(details.metadata || {}) };
   const spans = [];
   for (const reference of tab.references || []) if (reference.spanText && !spans.includes(reference.spanText)) spans.push(reference.spanText);
   for (const row of paper.evidenceRecords || []) for (const span of row.supporting_text_spans || []) if (!spans.includes(span)) spans.push(span);
@@ -26,8 +40,9 @@ export default function EvidencePaperTab({ tab }) {
   const unknownScores = Object.entries(scores).filter(([key]) => !channels.some(channel => channel.keys.includes(key.toLowerCase())));
 
   return <div className="evidence-paper-content">
-    {paper.detailError && !errorDismissed && <div className="detail-warning" role="alert">Paper details could not be loaded. This tab remains open; the paper data returned in the conversation is shown below. <button type="button" onClick={() => setErrorDismissed(true)}>Continue with available record</button></div>}
-    {paper.sessionExpired && <div className="detail-warning" role="status">Your session expired. Sign in again to load additional paper details; this evidence tab is preserved.</div>}
+    {details.status === "loading" && <p className="inline-state" role="status">Loading full paper metadata…</p>}
+    {details.status === "error" && <div className="detail-warning" role="alert">Paper details could not be loaded. This tab remains open; the available conversation record is shown below. <button type="button" onClick={() => setRetryAttempt(current => current + 1)}>Retry paper details</button></div>}
+    {(paper.sessionExpired || details.errorStatus === 401) && <div className="detail-warning" role="status">Your session expired. Sign in again to load additional paper details; this evidence tab is preserved.</div>}
     <h2 className="drawer-paper-title">{formatValue(paper.title, `PMID ${paper.pmid}`)}</h2>
     <div className="drawer-metadata"><span>PMID: {paper.pmid}</span><span>{formatValue(paper.year || paper.publication_date)}</span><span>{formatValue(paper.study_type)}</span><span>{formatValue(paper.journal)}</span></div>
     <div className="drawer-actions">
@@ -37,7 +52,7 @@ export default function EvidencePaperTab({ tab }) {
     {paper.empty && <p className="inline-state" role="status">No additional paper details were returned. The selected source stays available in this workspace.</p>}
     <section className="paper-section"><h3>Abstract</h3><p className="drawer-abstract">{formatValue(paper.abstract, "No abstract was returned.")}</p></section>
     <section className="paper-section"><h3>Study details</h3><dl className="paper-details">
-      <div><dt>Authors</dt><dd>{formatValue(paper.authors)}</dd></div><div><dt>Journal</dt><dd>{formatValue(paper.journal)}</dd></div><div><dt>Year</dt><dd>{formatValue(paper.publication_date || paper.year)}</dd></div><div><dt>Study type</dt><dd>{formatValue(paper.study_type)}</dd></div><div><dt>MeSH terms</dt><dd>{formatValue(paper.mesh_terms)}</dd></div><div><dt>Keywords</dt><dd>{formatValue(paper.keywords)}</dd></div>
+      <div><dt>Authors</dt><dd>{formatValue(paper.authors)}</dd></div><div><dt>Journal</dt><dd>{formatValue(paper.journal)}</dd></div><div><dt>Year</dt><dd>{formatValue(paper.publication_date || paper.year)}</dd></div><div><dt>Study type</dt><dd>{formatValue(paper.study_type)}</dd></div><div><dt>MeSH terms</dt><dd>{metadataText(paper.mesh_terms, details.status)}</dd></div><div><dt>Keywords</dt><dd>{metadataText(paper.keywords, details.status)}</dd></div>
     </dl></section>
     {(paper.evidenceRecords || []).length > 0 && <section className="paper-section"><h3>Extracted findings</h3>{paper.evidenceRecords.map((record, index) => <article className="paper-finding" key={`${record.pmid}-${index}`}><p>{formatValue(record.key_findings, "No finding text was returned.")}</p><dl className="paper-details"><div><dt>Outcome</dt><dd>{formatValue(record.outcome)}</dd></div><div><dt>Limitations</dt><dd>{formatValue(record.limitations)}</dd></div></dl></article>)}</section>}
     <section className="paper-section"><h3>Supporting spans used in this conversation</h3>

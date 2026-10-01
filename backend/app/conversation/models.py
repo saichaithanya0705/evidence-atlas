@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from backend.app.core.limits import CONVERSATION_ASSISTANT_MAX_CHARS
 
 from backend.app.models.request_response import (
     AgentAction,
@@ -10,6 +11,9 @@ from backend.app.models.request_response import (
     PublicEvidenceRecord,
     PublicSearchCandidate,
 )
+
+# Expanded, validated reports must retain their final paragraphs and citations.
+MAX_ASSISTANT_MESSAGE_CHARS = CONVERSATION_ASSISTANT_MAX_CHARS
 
 
 class _StrictModel(BaseModel):
@@ -74,7 +78,7 @@ class ConversationAgentDecision(_StrictModel):
 class ConversationTurnContext(_StrictModel):
     turn_id: str = Field(max_length=100)
     role: Literal["user", "assistant"]
-    content: str = Field(max_length=4000)
+    content: str = Field(max_length=MAX_ASSISTANT_MESSAGE_CHARS)
 
 
 class ConversationHistoryWindow(_StrictModel):
@@ -150,7 +154,7 @@ class ConversationTurnRecord(_StrictModel):
     user_message: str = Field(max_length=4000)
     action: AgentAction | None
     answer_status: AnswerStatus | None = None
-    assistant_message: str | None = Field(default=None, max_length=4000)
+    assistant_message: str | None = Field(default=None, max_length=MAX_ASSISTANT_MESSAGE_CHARS)
     created_at: datetime
     result: ConversationTurnPublicResult | None = None
 
@@ -176,7 +180,7 @@ class ConversationTurnResponse(_StrictModel):
     turn_id: str = Field(max_length=100)
     action: AgentAction
     answer_status: AnswerStatus
-    assistant_message: str = Field(max_length=4000)
+    assistant_message: str = Field(max_length=MAX_ASSISTANT_MESSAGE_CHARS)
     cited_pmids: list[Annotated[str, Field(max_length=20)]] = Field(default_factory=list, max_length=100)
     evidence_table: list[PublicEvidenceRecord] = Field(default_factory=list, max_length=100)
     retrieved_papers: list[PublicSearchCandidate] = Field(default_factory=list, max_length=100)

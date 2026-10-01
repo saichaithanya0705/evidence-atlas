@@ -1,6 +1,6 @@
 {
-  "file_path": "data/raw/pubmed_sample.csv",
-  "total_rows": 29995,
+  "file_path": "data\\raw\\pubmed_sample.csv",
+  "total_rows": 23120,
   "columns_found": [
     "pmid",
     "title",
@@ -22,9 +22,9 @@
     "abstract": "abstract"
   },
   "duplicate_pmid_count": 0,
-  "duplicate_title_abstract_count": 21,
+  "duplicate_title_abstract_count": 14,
   "empty_title_count": 0,
   "empty_abstract_count": 0,
   "both_title_and_abstract_empty": 0,
-  "usable_rows_estimated": 29974
+  "usable_rows_estimated": 23106
 }

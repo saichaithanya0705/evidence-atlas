@@ -112,7 +112,7 @@ class PICOExtractor:
             # Detect intervention from phrasing: "efficacy of X in Y" or "X in Y" or "reduction with X"
             with_match = re.search(
                 r"\b(?:with|using|of)\s+([A-Za-z0-9][A-Za-z0-9\-\s]*?)"
-                r"(?=\s+(?:in|for|after|monotherapy)\b|[?,;.]|$)",
+                r"(?=\s+(?:in|for|against|after|monotherapy)\b|[?,;.]|$)",
                 q,
                 re.IGNORECASE,
             )
@@ -123,7 +123,7 @@ class PICOExtractor:
             elif "efficacy of" in q_lower or "safety of" in q_lower:
                 m = re.search(
                     r"(?:efficacy|safety|effect)\s+of\s+([A-Za-z0-9][A-Za-z0-9\-\s]*?)"
-                    r"(?=\s+(?:in|for|vs|versus)\b|[?,;.]|$)",
+                    r"(?=\s+(?:in|for|against|vs|versus)\b|[?,;.]|$)",
                     q,
                     re.IGNORECASE,
                 )
@@ -159,7 +159,10 @@ class PICOExtractor:
             if pop_match:
                 cand = pop_match.group(1).strip()
                 # Exclude outcomes if accidentally captured
-                if cand.lower() not in ("remission", "mortality", "mace", "safety"):
+                if cand.lower() not in ("remission", "mortality", "mace", "safety") and not re.fullmatch(
+                    r"(?:(?:recent|published|current|available|clinical)\s+)*(?:research|studies|literature|evidence|trials)",
+                    cand, re.IGNORECASE,
+                ):
                     population = cand
 
             # Specific known clinical populations

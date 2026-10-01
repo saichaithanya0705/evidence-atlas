@@ -21,6 +21,14 @@ from backend.app.conversation.policy import has_biomedical_context, prohibited_r
 _MAX_PROVIDER_CONTENT_CHARS = 12_000
 _ROUTE_ORDER = {"SIMPLE": 0, "MODERATE": 1, "COMPLEX": 2}
 _COMPARISON_OR_MECHANISM = re.compile(r"\b(compare|compared|compares|comparison|versus|vs\.?|mechanis\w*)\b", re.I)
+_RESEARCH_REFERENCE = re.compile(r"\b(?:the|these|those|previous|earlier|above)\s+(?:studies|papers|findings|results|evidence|report|answer)\b", re.I)
+_EVIDENCE_FOLLOWUP_WORDS = {
+    "above", "across", "agree", "agreement", "answer", "answers", "between", "compare", "comparison",
+    "conclusions", "consistent", "consistency", "contradict", "contradictory", "contrast", "differ", "differences",
+    "earlier", "evidence", "explain", "findings", "inconsistent", "limitations", "limited", "paper", "papers",
+    "previous", "report", "reports", "research", "results", "same", "similar", "strengths", "studies", "study",
+    "summarize", "summary", "these", "those", "weaknesses", "which", "how", "why",
+}
 _CONTEXT_DEPENDENT = re.compile(
     r"\b(it|its|they|them|their|this|that|these|those|there|same|former|latter)\b|"
     r"\bwhat about\b|\bhow about\b|\bdo the same\b|\band those\b",
@@ -127,6 +135,8 @@ class ConversationAgent:
                     "not follow. Resolve a follow-up into a standalone research question only when context supports "
                     "it. ABSTAIN from unrelated topics, requests to disclose secrets or bypass validation, and requests "
                     "to fabricate studies or citations. Do not turn unrelated questions into medical questions. "
+                    "A standalone_query must explicitly name the biomedical subject from the conversation, including "
+                    "for ANSWER_FROM_EVIDENCE; generic references to studies or findings alone are insufficient. "
                     "Ask one focused clarification when needed. Use ANSWER_FROM_EVIDENCE only with supplied source "
                     "turn IDs. Enforce these action fields: RESEARCH requires standalone_query and complexity_hint, "
                     "with message null and no referenced_turn_ids; CLARIFY/ABSTAIN require message, with "
@@ -151,7 +161,7 @@ class ConversationAgent:
 
     @staticmethod
     def _is_independently_actionable(message: str) -> bool:
-        if not message.strip() or _CONTEXT_DEPENDENT.search(message) is not None:
+        if not message.strip() or _CONTEXT_DEPENDENT.search(message) is not None or _RESEARCH_REFERENCE.search(message) is not None:
             return False
         words = re.findall(r"[a-z0-9]+", message.casefold())
         if len(words) <= 2 and _SHORT_INTERROGATIVE.search(message):
@@ -198,8 +208,30 @@ class ConversationAgent:
         return False
 
     @staticmethod
-    def _fallback(message: str) -> ConversationAgentDecision:
+    def _fallback(message: str, history: ConversationHistoryWindow | None = None) -> ConversationAgentDecision:
         current = message.strip()[:4000]
+        # Generic questions about prior findings have no new clinical subject.
+        # Reuse an explicit user question; persisted-source eligibility is still
+        # checked by the service before any evidence can be released.
+        words = set(re.findall(r"[a-z0-9]+", current.casefold()))
+        if history is not None and _RESEARCH_REFERENCE.search(current):
+            for prior in reversed(history.recent_turns):
+                if prior.role == "user" and has_biomedical_context(prior.content) and not prohibited_request(prior.content):
+                    # A named topic is valid when it is already present in the
+                    # referenced question; do not silently substitute a new topic.
+                    prior_words = set(re.findall(r"[a-z0-9]+", prior.content.casefold()))
+                    residual = words - (_EVIDENCE_FOLLOWUP_WORDS | _QUESTION_FILLER_WORDS | _ANCHOR_PREPOSITIONS)
+                    if not residual <= prior_words:
+                        continue
+                    context = prior.content.strip()[: max(0, 4000 - len(current) - 20)]
+                    if not has_biomedical_context(context):
+                        continue
+                    return ConversationAgentDecision(
+                        action=AgentAction.ANSWER_FROM_EVIDENCE,
+                        standalone_query=f"{current}\nResearch context: {context}",
+                        referenced_turn_ids=[prior.turn_id],
+                        decision_summary="Resolved a generic evidence follow-up using the prior explicit biomedical question after planner failure.",
+                    )
         if ConversationAgent._is_independently_actionable(current):
             complexity = "MODERATE" if _COMPARISON_OR_MECHANISM.search(current) else "SIMPLE"
             return ConversationAgentDecision(
@@ -224,7 +256,8 @@ class ConversationAgent:
                 decision_summary="The requested action violates the evidence and confidentiality boundary.",
             )
         direct_request = re.match(r"\s*(?:write|create|generate|build|who|where|when|what\s+is)\b", current, re.I)
-        if (self._is_independently_actionable(current) or direct_request) and not has_biomedical_context(current):
+        prior_research_reference = bool(_RESEARCH_REFERENCE.search(current) and self._recent_turns(history))
+        if (self._is_independently_actionable(current) or direct_request) and not has_biomedical_context(current) and not prior_research_reference:
             return ConversationAgentDecision(
                 action=AgentAction.CLARIFY,
                 message="This workspace supports biomedical literature research. Please name a health condition, treatment, population, or biomedical outcome to study.",
@@ -248,7 +281,7 @@ class ConversationAgent:
                 )
             return decision
         except Exception:
-            return self._fallback(current)
+            return self._fallback(current, history)
 
     def _gap_review_messages(self, context: EvidenceGapContext) -> list[dict[str, str]]:
         payload = context.model_dump(mode="json")

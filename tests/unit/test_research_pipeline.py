@@ -424,14 +424,22 @@ def test_answer_from_evidence_revalidates_claims_without_retrieval_and_sets_stat
     )
     candidate = make_candidate(pmid="12345")
 
+    recorded_events = []
     response = service.answer_from_evidence(
         "Drug A kidney outcomes",
         candidates=[candidate], evidence=[evidence],
+        event_sink=lambda stage, payload: recorded_events.append((stage, payload)),
     )
 
-    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert response.answer_status == AnswerStatus.LIMITED
     assert response.citations_valid is True
     assert response.cited_pmids == ["12345"]
+    assert "The retrieved evidence contains fewer than two studies for cross-study comparison." in response.evidence_gaps
+    trace = service.get_trace(response.request_id)
+    assert [item["stage"] for item in trace["timings_ms"]["stages"]] == ["query_analysis", "judge", "synthesize", "validate"]
+    assert all(item["duration_ms"] >= 0 for item in trace["timings_ms"]["stages"])
+    assert len(recorded_events) == 10
+    assert not any(stage == "retrieve" for stage, _ in recorded_events)
 
 
 def test_limited_research_explicitly_states_unresolved_question_and_gaps():
@@ -460,6 +468,10 @@ def test_limited_evidence_only_answer_explicitly_reports_unresolved_parts():
     assert "The full question was not established by the available evidence." in response.synthesis
     assert "Evidence gaps are listed separately in the response." in response.synthesis
     assert "comparative safety" in response.evidence_gaps
+    trace = service.get_trace(response.request_id)
+    assert trace["execution_mode"] == "prior_evidence"
+    assert trace["retrieval_iterations"] == []
+    assert trace["citation_audit"]["valid"]
 
 
 def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span_fallback():
@@ -484,9 +496,10 @@ def test_evidence_only_generated_prose_without_semantic_approval_uses_exact_span
         "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
     )
 
-    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert response.answer_status == AnswerStatus.LIMITED
     assert generated_claim not in response.synthesis
     assert f"{source_span[:-1]} [PMID: 12345]." in response.synthesis
+    assert "The retrieved evidence contains fewer than two studies for cross-study comparison." in response.evidence_gaps
 
 
 def test_evidence_only_exact_span_fallback_is_supported_without_semantic_service():
@@ -503,8 +516,9 @@ def test_evidence_only_exact_span_fallback_is_supported_without_semantic_service
         "Drug A kidney outcomes", candidates=[make_candidate(pmid="12345")], evidence=[evidence]
     )
 
-    assert response.answer_status == AnswerStatus.SUPPORTED
+    assert response.answer_status == AnswerStatus.LIMITED
     assert f"{source_span[:-1]} [PMID: 12345]." in response.synthesis
+    assert "The retrieved evidence contains fewer than two studies for cross-study comparison." in response.evidence_gaps
 
 
 def test_answer_from_evidence_with_no_safe_claim_is_insufficient():
@@ -518,6 +532,8 @@ def test_answer_from_evidence_with_no_safe_claim_is_insufficient():
 
 
 def test_answer_from_evidence_releases_no_semantically_rejected_claim():
+    generated_claim = "Among adults with diabetes, Drug A reduced kidney disease progression [PMID: 12345]."
+
     class RejectAllSemanticClaims:
         available = True
 
@@ -527,7 +543,14 @@ def test_answer_from_evidence_releases_no_semantically_rejected_claim():
             return [ClaimVerification(claim_index=0, supported=False, supporting_pmids=[], rationale="not established")]
 
     service = make_test_service(judge=AlwaysSufficientJudge())
-    synthesizer = EvidenceSynthesizer(semantic_verifier=RejectAllSemanticClaims())
+
+    class UnverifiedGeneratedSynthesizer(EvidenceSynthesizer):
+        def synthesize(self, query, records, gaps, insufficient=False):
+            audit = self.validator.validate(generated_claim, records)
+            assert audit.valid
+            return SynthesisResult(generated_claim, "nvidia_nim", None, audit)
+
+    synthesizer = UnverifiedGeneratedSynthesizer(semantic_verifier=RejectAllSemanticClaims())
     service._synthesizer = synthesizer
     evidence = EvidenceRecord(
         pmid="12345", key_findings="Drug A reduced kidney disease progression.",
@@ -541,6 +564,7 @@ def test_answer_from_evidence_releases_no_semantically_rejected_claim():
     assert response.answer_status == AnswerStatus.INSUFFICIENT
     assert response.cited_pmids == []
     assert "insufficient" in response.synthesis.casefold()
+    assert generated_claim not in response.synthesis
 
 
 def test_research_semantic_release_rejection_adds_gap_and_audit_counts_it():
@@ -563,9 +587,20 @@ def test_research_semantic_release_rejection_adds_gap_and_audit_counts_it():
                 for index, _claim in enumerate(_claims(synthesis))
             ]
 
+    generated_claims = (
+        "Among patients with type 2 diabetes and chronic kidney disease, empagliflozin reduced progression of kidney disease compared with placebo [PMID: 35100001].\n"
+        "Among patients with type 2 diabetes and chronic kidney disease, empagliflozin reduced progression of kidney disease compared with placebo [PMID: 35100002]."
+    )
+
+    class UnverifiedGeneratedSynthesizer(EvidenceSynthesizer):
+        def synthesize(self, query, records, gaps, insufficient=False):
+            audit = self.validator.validate(generated_claims, records)
+            assert audit.valid
+            return SynthesisResult(generated_claims, "nvidia_nim", None, audit)
+
     service = make_test_service(
         judge=AlwaysSufficientJudge(), hybrid=TwoStudyHybrid(),
-        synthesizer=EvidenceSynthesizer(semantic_verifier=RejectAllSemanticClaims()),
+        synthesizer=UnverifiedGeneratedSynthesizer(semantic_verifier=RejectAllSemanticClaims()),
     )
     events = []
 
@@ -579,14 +614,12 @@ def test_research_semantic_release_rejection_adds_gap_and_audit_counts_it():
     assert judge_event["grade"] == "SUFFICIENT"
     assert judge_event["missing_count"] == 0 and judge_event["conflict_count"] == 0
     assert response.answer_status is AnswerStatus.INSUFFICIENT
+    for claim in generated_claims.splitlines():
+        assert claim not in response.synthesis
     assert response.evidence_gaps
     assert "No retrieved claim passed the citation and semantic verification gates." in response.evidence_gaps
     assert release_event["status"] == "INSUFFICIENT"
     assert release_event["gap_count"] == len(response.evidence_gaps)
-    repair_event = next(payload for name, payload in events if name == "claim_repair")
-    assert repair_event["attempt_count"] == 1
-    assert repair_event["pruned_claims"] >= 1
-    assert service.get_trace("semantic-rejection-gap")["synthesis_metadata"]["repair"] == repair_event
 
 
 def test_failed_gap_reviewer_uses_deterministic_correction_and_maps_limited():

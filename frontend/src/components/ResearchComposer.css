@@ -1,0 +1,22 @@
+.conversation-composer { display: grid; gap: 10px; margin-top: 22px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.conversation-composer > label { color: var(--ink); font-size: 13px; font-weight: 700; }
+.conversation-composer textarea { width: 100%; min-height: 108px; resize: vertical; border: 1px solid var(--line); border-radius: 7px; padding: 13px 14px; color: var(--ink); background: #fbfcfa; font: inherit; line-height: 1.6; }
+.conversation-composer textarea::placeholder { color: var(--muted); opacity: .85; }
+.conversation-composer textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px #3f82731c; outline: none; }
+.composer-meta, .composer-actions, .composer-filter-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.composer-meta span:last-child { font-variant-numeric: tabular-nums; }
+.composer-admin-controls { border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 12px; }
+.composer-admin-controls summary { cursor: pointer; color: var(--blue); font-weight: 700; }
+.composer-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 13px; }
+.composer-filter-grid label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.composer-filter-grid select { width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; color: var(--ink); background: var(--paper); font: inherit; }
+.composer-filter-grid select:focus { border-color: var(--blue); outline: 2px solid #3f82732c; outline-offset: 1px; }
+.composer-filter-error { margin: 9px 0 0; color: #8a3f31; font-size: 11px; }
+.composer-filter-summary { margin-top: 12px; }
+.composer-filter-summary button { border: 0; padding: 0; color: var(--blue); background: transparent; font: inherit; cursor: pointer; text-decoration: underline; }
+.composer-actions { margin-top: 2px; }
+.composer-status { min-height: 16px; color: var(--blue); font-weight: 600; }
+.research-button { min-height: 40px; border: 1px solid var(--blue); border-radius: 7px; padding: 8px 16px; background: var(--blue); color: #fff; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.research-button:disabled { cursor: wait; opacity: .6; }
+@media (max-width: 700px) { .composer-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px) { .composer-meta, .composer-actions, .composer-filter-summary { align-items: flex-start; flex-direction: column; }.composer-actions .research-button { width: 100%; }.composer-filter-grid { grid-template-columns: 1fr; } }

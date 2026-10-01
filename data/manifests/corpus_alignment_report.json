@@ -1,0 +1,11 @@
+{
+  "corpus_sha256": "260ee8f70f8b1dadbfb1953c437a90760a8a7ef4249454778d4e865fa1743d30",
+  "clean_records": 23093,
+  "embedding_shape": [
+    23093,
+    768
+  ],
+  "bm25_records": 23093,
+  "qdrant_records": 23093,
+  "all_ids_payloads_dense_vectors_match": true
+}

@@ -1,19 +1,30 @@
 {
-  "generated_at": "2026-09-27T15:06:31.428949+00:00",
+  "generated_at": "2026-10-01T06:34:43.947079+00:00",
   "source": "NCBI PubMed E-utilities",
   "source_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
-  "phrase_archive": "D:\\projects\\capstone\\PubMed_Phrases.tar.gz",
-  "phrase_archive_sha256": "69dc5d323c13647f321c22410960e2cd99e66139c1d50122d6dc03c7427b066c",
-  "phrases": [
-    "sglt2 inhibitor",
-    "chronic kidney disease"
-  ],
-  "phrase_match_counts": {
-    "chronic kidney disease": 29867,
-    "sglt2 inhibitor": 291
+  "upstream_corpus": "PubMed/MEDLINE",
+  "selection_strategy": "balanced round-robin across phrase and query seeds",
+  "profile": "broad-medical",
+  "phrase_archive": null,
+  "phrase_archive_sha256": null,
+  "phrases": [],
+  "phrase_match_counts": {},
+  "search_queries": {
+    "mrna_vaccines_respiratory_2020_plus": "(\"mRNA vaccine\"[Title/Abstract] OR \"messenger RNA vaccine\"[Title/Abstract]) AND (\"Respiratory Tract Infections\"[Mesh] OR COVID-19[Mesh] OR respiratory[Title/Abstract]) AND (\"2020/01/01\"[Date - Publication] : \"3000\"[Date - Publication])",
+    "diabetes_cardiovascular_2020_plus": "(\"Diabetes Mellitus\"[Mesh] OR diabetes[Title/Abstract]) AND (\"Cardiovascular Diseases\"[Mesh] OR cardiovascular[Title/Abstract]) AND (\"2020/01/01\"[Date - Publication] : \"3000\"[Date - Publication])",
+    "chronic_kidney_disease_sglt2": "(\"Renal Insufficiency, Chronic\"[Mesh] OR \"chronic kidney disease\"[Title/Abstract]) AND (\"Sodium-Glucose Transporter 2 Inhibitors\"[Mesh] OR \"SGLT2 inhibitor\"[Title/Abstract])",
+    "comparative_treatments_2020_plus": "(\"Comparative Effectiveness Research\"[Mesh] OR \"comparative effectiveness\"[Title/Abstract] OR \"treatment comparison\"[Title/Abstract]) AND (\"2020/01/01\"[Date - Publication] : \"3000\"[Date - Publication])"
   },
-  "requested_pmids": 250,
-  "usable_abstract_records": 249,
-  "unusable_or_missing_records": 1,
-  "output": "D:\\projects\\capstone\\data\\raw\\pubmed_sample.csv"
+  "search_match_counts": {
+    "mrna_vaccines_respiratory_2020_plus": 3515,
+    "diabetes_cardiovascular_2020_plus": 9999,
+    "chronic_kidney_disease_sglt2": 1918,
+    "comparative_treatments_2020_plus": 9030
+  },
+  "requested_pmids": 24226,
+  "usable_abstract_records": 23120,
+  "unusable_or_missing_records": 1106,
+  "output": "D:\\projects\\capstone\\data\\raw\\pubmed_sample.csv",
+  "promoted_from": "D:\\projects\\capstone\\data\\raw\\pubmed_full.csv",
+  "output_sha256": "782dba721cc95029733ec92d10de5737fbfaf496dbc8e1b8f5e550ba11b8812a"
 }

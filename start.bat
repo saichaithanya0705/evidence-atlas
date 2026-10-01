@@ -67,14 +67,10 @@ echo Created .env from .env.example. Edit NVIDIA_API_KEY and LLM_MODE for live N
 
 :env_ready
 if "%INGEST_DATA%"=="0" goto project_setup
-if not exist "PubMed_Phrases.tar.gz" (
-    echo PubMed_Phrases.tar.gz is required for --ingest but was not found in the project root.
-    exit /b 1
-)
 if not defined PUBMED_INGEST_LIMIT set "PUBMED_INGEST_LIMIT=100000"
 set "PUBMED_FORCE_REINDEX=1"
-echo Building the real PubMed corpus from phrase PMIDs and official NCBI records...
-"%PYTHON%" scripts\ingest_pubmed_phrases.py --limit "%PUBMED_INGEST_LIMIT%" --output data\raw\pubmed_sample.csv
+echo Building the current, balanced PubMed corpus from official NCBI searches and records...
+"%PYTHON%" scripts\ingest_pubmed_phrases.py --profile broad-medical --limit "%PUBMED_INGEST_LIMIT%" --output data\raw\pubmed_sample.csv
 if errorlevel 1 goto failed
 
 :project_setup

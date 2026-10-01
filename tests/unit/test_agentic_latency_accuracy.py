@@ -74,7 +74,7 @@ def test_incomplete_or_invented_verdicts_are_not_cached(bad):
     assert len(calls) == 2
 
 
-def test_model_failure_keeps_fallback_within_the_verification_output_budget():
+def test_exact_fallback_skips_semantic_verification_and_keeps_output_budget():
     calls = []
     def provider(claims, evidence):
         calls.append(claims)
@@ -84,8 +84,9 @@ def test_model_failure_keeps_fallback_within_the_verification_output_budget():
     records = [record(str(index)) for index in range(10)]
     result = EvidenceSynthesizer(client=unavailable, semantic_verifier=SemanticClaimVerifier(client=provider)).synthesize("blood pressure", records, [], True)
     assert result.audit.valid
+    assert result.audit.cited_pmids == ["0", "1", "2", "3"]
     assert len(_claims(result.text)) == 4
-    assert len(calls[0]) == 4
+    assert calls == []
 
 
 def test_request_budget_starts_with_provider_work_and_never_extends(monkeypatch):

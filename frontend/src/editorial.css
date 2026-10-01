@@ -288,7 +288,9 @@ aside.paper-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; display: f
 .evidence-workspace-heading { flex: 0 0 auto; padding: 18px 22px 13px; border-bottom: 1px solid var(--line-soft); }
 .evidence-workspace-heading > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .evidence-workspace-heading h2 { margin: 5px 0 0; font: 400 22px/1.25 Georgia, serif; }
-.evidence-mobile-close { display: none; }
+.evidence-close { display: inline-grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); color: var(--ink); cursor: pointer; }
+.evidence-close:hover { background: var(--line-soft); }
+.evidence-close:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .evidence-tabstrip { display: flex; flex: 0 0 auto; gap: 5px; overflow-x: auto; overscroll-behavior-x: contain; padding: 9px 12px 0; border-bottom: 1px solid var(--line); scrollbar-width: thin; }
 .evidence-tab-item { display: flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 260px; border-bottom: 2px solid transparent; }
 .evidence-tab-item:has([aria-selected="true"]) { border-bottom-color: var(--blue); }
@@ -323,7 +325,6 @@ aside.paper-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; display: f
 @media (max-width: 768px) {
   .evidence-workspace { z-index: 51; inset: 0; width: 100%; min-width: 0; max-width: none; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
   .evidence-backdrop { display: block; position: fixed; z-index: 50; inset: 0; width: 100%; height: 100%; border: 0; background: #112a32a8; }
-  .evidence-mobile-close { display: inline-grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); color: var(--ink); font-size: 23px; }
   .evidence-workspace-heading { padding: 13px 16px 11px; }
   .evidence-workspace-heading h2 { font-size: 20px; }
   .evidence-tabstrip { padding-right: 8px; padding-left: 8px; }
@@ -418,3 +419,11 @@ aside.paper-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; display: f
 .evaluation-section .status-pill-not_run { background: #f4efdf; color: #7c672a; }
 .evaluation-section ul { padding-left: 20px; color: var(--muted); line-height: 1.7; }
 @media (max-width: 600px) { .evaluation-metadata { grid-template-columns: 1fr; } .evaluation-section { padding: 15px; } }
+.audit-mode { padding: 16px 24px; color: #405550; line-height: 1.6; }
+.audit-timeline time { display: block; margin: 6px 0 10px; }
+.audit-timeline dl > div { gap: 20px; padding: 6px 0; }
+.audit-timeline dd { line-height: 1.6; }
+.audit-facts dd { white-space: pre-wrap; line-height: 1.6; }
+.page-toolbar { flex-wrap: wrap; }
+.page-toolbar p { flex: 1 1 280px; font-size: 12px; color: #647872; }
+.page-toolbar button { padding: 9px 14px; border: 1px solid #cbd8d0; border-radius: 5px; background: #fffefa; color: #176a60; }

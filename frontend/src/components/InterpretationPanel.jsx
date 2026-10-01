@@ -22,8 +22,8 @@ const coverageLabels = {
   BLOCKED: "Could not assess",
 };
 
-export default function InterpretationPanel({ interpretation, isAdmin = false }) {
-  const [expanded, setExpanded] = useState(true);
+export default function InterpretationPanel({ interpretation, isAdmin = false, initiallyExpanded = true }) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const pico = interpretation?.pico || {};
   const concepts = interpretation?.mesh_concepts || [];
   const subquestions = interpretation?.subquestions || [];

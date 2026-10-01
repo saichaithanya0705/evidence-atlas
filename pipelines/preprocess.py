@@ -156,7 +156,14 @@ def parse_authors_array(authors_str: str) -> List[str]:
 
 def infer_study_type(pub_types: List[str], title: str, abstract: str) -> str:
     """Infers canonical study design category from publication types and text."""
-    combined = " ".join(pub_types) + " " + title + " " + abstract
+    # Authoritative publication types outrank studies merely discussed in text.
+    source_types = " ".join(pub_types)
+    for pattern, label in STUDY_DESIGN_PATTERNS:
+        if pattern.search(source_types):
+            return label
+    if any("guideline" in item.casefold() for item in pub_types):
+        return StudyType.OTHER.value
+    combined = title + " " + abstract
     for pattern, label in STUDY_DESIGN_PATTERNS:
         if pattern.search(combined):
             return label

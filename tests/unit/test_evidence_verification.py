@@ -302,7 +302,7 @@ def test_one_time_repair_releases_only_semantically_verified_spans():
 
 def test_failed_repair_prunes_claim_and_abstains_when_none_remain():
     original = (
-        "Drug A reduced kidney disease progression among adults with diabetes [PMID: 12345].\n"
+        "Among adults with diabetes, Drug A reduced kidney disease progression [PMID: 12345].\n"
         "Drug B improved survival among adults with cancer [PMID: 54321]."
     )
     semantic_provider = Provider([json.dumps({"verdicts": [{
