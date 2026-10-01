@@ -62,29 +62,31 @@ class TestEmpiricalQdrantStorage:
         """Verify EVERY point stored in Qdrant has exact 768-dim vector and unit norm."""
         client = QdrantClient(path=str(self.STORAGE_PATH))
         try:
-            # Scroll all points with vectors
-            points, _ = client.scroll(
-                collection_name=self.COLLECTION_NAME,
-                limit=self.expected_count + 1,
-                with_vectors=True,
-                with_payload=True
-            )
-            assert len(points) == self.expected_count, (
-                f"Expected {self.expected_count} points in scroll, got {len(points)}"
-            )
-
-            for pt in points:
-                assert isinstance(pt.vector, dict), "Hybrid collection must expose named vectors"
-                assert "dense" in pt.vector and "bm25" in pt.vector
-                vec = np.array(pt.vector["dense"], dtype=np.float32)
-                # Invariant 1: dimension must be 768
-                assert vec.shape == (768,), f"PMID {pt.id} vector dimension mismatch: {vec.shape} != (768,)"
-                # Invariant 2: values must be finite floats
-                assert np.isfinite(vec).all(), f"PMID {pt.id} vector contains NaN/Inf"
-                # Invariant 3: L2 unit norm check (MedCPT article encoder normalizes vectors)
-                norm = np.linalg.norm(vec)
-                assert abs(norm - 1.0) < 1e-3, f"PMID {pt.id} vector not unit normalized: norm={norm}"
-            print(f"[Qdrant] Verified all {len(points)} points have exact 768 dimensions and L2 unit norm.")
+            # Validate every vector without retaining the entire corpus as
+            # Python floats, including in an assertion-failure traceback.
+            offset = None
+            count = 0
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.COLLECTION_NAME,
+                    limit=256,
+                    offset=offset,
+                    with_vectors=True,
+                    with_payload=False,
+                )
+                for pt in points:
+                    assert isinstance(pt.vector, dict), "Hybrid collection must expose named vectors"
+                    assert "dense" in pt.vector and "bm25" in pt.vector
+                    vec = np.array(pt.vector["dense"], dtype=np.float32)
+                    assert vec.shape == (768,), f"PMID {pt.id} vector dimension mismatch: {vec.shape} != (768,)"
+                    assert np.isfinite(vec).all(), f"PMID {pt.id} vector contains NaN/Inf"
+                    norm = np.linalg.norm(vec)
+                    assert abs(norm - 1.0) < 1e-3, f"PMID {pt.id} vector not unit normalized: norm={norm}"
+                count += len(points)
+                if offset is None:
+                    break
+            assert count == self.expected_count, f"Expected {self.expected_count} points in scroll, got {count}"
+            print(f"[Qdrant] Verified all {count} points have exact 768 dimensions and L2 unit norm.")
         finally:
             client.close()
 

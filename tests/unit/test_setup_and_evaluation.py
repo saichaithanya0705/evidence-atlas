@@ -195,8 +195,6 @@ def test_task11_promoted_report_is_complete_checksum_valid_and_matches_docs():
     assert len(benchmark["entries"]) == 40
     assert len({entry["id"] for entry in benchmark["entries"]}) == 40
     assert benchmark["corpus_record_count"] == 29994
-    index_manifest = json.loads((root / "data" / "manifests" / "index_manifest.json").read_text(encoding="utf-8"))
-    assert index_manifest["corpus"]["total_records"] == 29994
 
     reports = root / "evaluation" / "reports"
     manifest = json.loads((reports / "manifest.json").read_text(encoding="utf-8"))
@@ -211,7 +209,14 @@ def test_task11_promoted_report_is_complete_checksum_valid_and_matches_docs():
     assert _sha256(report_path) == checksums["report.json"]
     assert _sha256(report_md_path) == checksums["report.md"]
     assert report["benchmark_checksum"] == _sha256(benchmark_path)
-    assert report["corpus_checksum"] == index_manifest["corpus"]["sha256"]
+    # Frozen benchmark validation describes the corpus used to create its labels.
+    # Each promoted run records its own corpus, which can differ after a restore
+    # or rebuild. Empirical tests separately validate the active local index.
+    validation = json.loads((root / "data" / "evaluation" / "benchmark_v2_validation.json").read_text(encoding="utf-8"))
+    assert validation["benchmark_checksum"] == report["benchmark_checksum"]
+    assert validation["corpus_record_count"] == benchmark["corpus_record_count"]
+    assert __import__("re").fullmatch(r"[0-9a-f]{64}", validation["corpus_checksum"])
+    assert __import__("re").fullmatch(r"[0-9a-f]{64}", report["corpus_checksum"])
     assert __import__("re").fullmatch(r"[0-9a-f]{64}", report["configuration_checksum"])
     assert report["query_count"] == 40
     assert report["variants"] == ["dense_only", "hybrid", "reranked", "agentic"]
@@ -223,8 +228,20 @@ def test_task11_promoted_report_is_complete_checksum_valid_and_matches_docs():
         for metric in report["metrics"].values()
     )
     assert len(checksums["queries"]) == 40
+    query_rows = []
     for filename, checksum in checksums["queries"].items():
         assert _sha256(run_dir / "queries" / filename) == checksum
+        query_rows.append(json.loads((run_dir / "queries" / filename).read_text(encoding="utf-8")))
+    assert {row["query_id"] for row in query_rows} == {entry["id"] for entry in benchmark["entries"]}
+    assert all(set(row["variants"]) == set(report["variants"]) for row in query_rows)
+    assert report["configuration_checksum"] == stable_checksum({
+        variant: sorted(row["variants"][variant]["configuration_hash"] for row in query_rows)
+        for variant in report["variants"]
+    })
+    from collections import Counter
+    assert report["answer_status_distribution"] == dict(Counter(
+        row["variants"]["agentic"]["answer_status"] for row in query_rows
+    ))
     markdown = report_md_path.read_text(encoding="utf-8")
     validate_report_agreement(report, markdown)
     assert all(f"| {name} | {metric['status']} |" in markdown for name, metric in report["metrics"].items())

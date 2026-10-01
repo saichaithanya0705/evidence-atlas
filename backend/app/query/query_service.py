@@ -201,7 +201,7 @@ class QueryAnalysisService:
     ) -> EnhancedQuery:
         combined_query = raw_query
         notes = ["Preserved the verbatim user query."]
-        if agent_rewrite and agent_rewrite.strip():
+        if agent_rewrite and agent_rewrite.strip() and agent_rewrite.strip().casefold() != raw_query.strip().casefold():
             combined_query = f"{raw_query} {agent_rewrite.strip()}"
             notes.append("Added the agent rewrite alongside the raw query for concept coverage.")
 

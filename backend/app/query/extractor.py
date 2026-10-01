@@ -135,7 +135,15 @@ class PICOExtractor:
                     intervention = m.group(1).strip()
             elif with_match:
                 cand = with_match.group(1).strip()
-                if cand.lower() not in ("patients", "kidney damage", "ckd", "diabetes", "tau"):
+                association_objective = re.search(
+                    r"\b(?:association|associated|correlat\w*|incidence|prevalence|predictors?|prognosis)\b",
+                    q, re.IGNORECASE,
+                )
+                population_with = re.search(
+                    r"\b(?:patients?|people|cohorts?|individuals?|adults|children|infants)\s*$",
+                    q[:with_match.start()], re.IGNORECASE,
+                )
+                if not association_objective and not population_with and cand.lower() not in ("patients", "kidney damage", "ckd", "diabetes", "tau"):
                     intervention = cand
 
         # ---------------------------------------------------------------------
@@ -144,7 +152,7 @@ class PICOExtractor:
         if not population:
             # Pattern: "in [patients with / cohorts with] X"
             pop_match = re.search(
-                r"\b(?:in|among|for)\s+(?:patients\s+(?:with\s+)?|cohorts?\s+(?:with\s+)?|individuals?\s+(?:with\s+)?|adults\s+(?:with\s+)?|children\s+(?:with\s+)?|infants\s+(?:with\s+)?)?\s*([^,;.?]+?)(?:\s+(?:published|after|receiving|treated)|[?]|$)",
+                r"\b(?:in|among|for)\s+(?:patients\s+(?:with\s+)?|people\s+(?:with\s+)?|cohorts?\s+(?:with\s+)?|individuals?\s+(?:with\s+)?|adults\s+(?:with\s+)?|children\s+(?:with\s+)?|infants\s+(?:with\s+)?)?\s*([^,;.?]+?)(?:\s+(?:published|after|receiving|treated)|[?]|$)",
                 q,
                 re.IGNORECASE
             )

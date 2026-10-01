@@ -238,6 +238,32 @@ class TestCanonicalQueryFormulation:
         assert len(canon) > 15
         assert canon != "short query" or len(canon) > 20
 
+    def test_canonical_preserves_association_objective_despite_lossy_pico(self):
+        query = "What does the literature say about hyperkalemia incidence and outcomes in people with chronic kidney disease?"
+        pico = PICOExtractor().extract(query)
+        assert pico.population == "chronic kidney disease"
+        assert pico.intervention is None
+        canon = CanonicalQueryFormulator().formulate_deterministic(query, query, pico=pico)
+        assert "hyperkalemia incidence and outcomes" in canon
+        assert "efficacy" not in canon
+        assert "safety" not in canon
+
+    def test_partial_pico_cannot_erase_the_named_research_topic(self):
+        query = "What is the association between obesity and kidney disease?"
+        canon = CanonicalQueryFormulator().formulate_deterministic(
+            query, query, pico=PICOModel(intervention="kidney disease"),
+        )
+        assert "association between obesity and kidney disease" in canon
+        assert "efficacy" not in canon
+
+    @pytest.mark.parametrize("query", [
+        "Is nephrolithiasis associated with later CKD or end-stage kidney disease?",
+        "What is the incidence of hyperkalemia in people with chronic kidney disease?",
+        "Is obesity correlated with kidney disease?",
+    ])
+    def test_association_objectives_do_not_invent_interventions(self, query):
+        assert PICOExtractor().extract(query).intervention is None
+
     @pytest.mark.parametrize("query, forbidden_terms", [
         ("pediatric asthma", ["mrna", "vaccine", "2022"]),
         ("metformin in PCOS", ["myocardial infarction", "monotherapy", "heart attack"]),

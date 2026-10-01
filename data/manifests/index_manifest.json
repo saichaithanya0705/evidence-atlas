@@ -1,28 +1,28 @@
 {
   "manifest_version": "1.0.0",
-  "build_timestamp_utc": "2026-09-28T14:13:04.397505+00:00",
-  "build_duration_seconds": 173.67,
+  "build_timestamp_utc": "2026-09-28T00:38:31.994561+00:00",
+  "build_duration_seconds": 291.17,
   "corpus": {
     "source_file": "data\\processed\\cleaned_pubmed.parquet",
-    "sha256": "de14fbebfb00d541670e1fdf7202deddc60fbe5ae98a2fcc2e8881dc739ebc67",
-    "total_records": 29994,
+    "sha256": "2628237f352f7cf014fd82b09619771d02eaf17a161261569ebb5e0c57e174f6",
+    "total_records": 29939,
     "pmid_range": {
       "min": 956728,
       "max": 29195108
     },
     "year_range": {
       "min": 1949,
-      "max": 2026
+      "max": 2023
     },
     "study_type_breakdown": {
-      "Other": 14882,
-      "Review": 6466,
-      "Observational": 3713,
-      "Randomized Controlled Trial": 1769,
+      "Other": 14954,
+      "Review": 6334,
+      "Observational": 3719,
+      "Randomized Controlled Trial": 1768,
       "Clinical Trial": 1312,
-      "Preclinical Study": 922,
-      "Systematic Review": 643,
-      "Meta-Analysis": 287
+      "Preclinical Study": 929,
+      "Systematic Review": 635,
+      "Meta-Analysis": 288
     }
   },
   "dense_index": {
@@ -34,8 +34,8 @@
     "normalized": true,
     "metric": "cosine",
     "embeddings_file": "data\\processed\\article_embeddings.npy",
-    "storage_size_bytes": 92141696,
-    "storage_size_mb": 87.87
+    "storage_size_bytes": 91972736,
+    "storage_size_mb": 87.71
   },
   "sparse_index": {
     "algorithm": "BM25Okapi",
@@ -44,8 +44,8 @@
       "k1": 1.5,
       "b": 0.75
     },
-    "vocabulary_size": 84283,
-    "avg_document_length_tokens": 186.66,
+    "vocabulary_size": 86479,
+    "avg_document_length_tokens": 196.74,
     "indexed_fields": [
       "title",
       "abstract",
@@ -54,14 +54,14 @@
     ],
     "qdrant_vector_name": "bm25",
     "qdrant_modifier": "idf",
-    "storage_size_bytes": 43073667,
-    "storage_size_mb": 41.08
+    "storage_size_bytes": 44554701,
+    "storage_size_mb": 42.49
   },
   "vector_store": {
     "engine": "qdrant-client-embedded",
     "storage_path": "data\\qdrant_storage",
     "collection_name": "medical_abstracts",
-    "points_count": 29994,
+    "points_count": 29939,
     "vector_names": [
       "dense",
       "bm25"
@@ -80,8 +80,8 @@
         "schema_type": "keyword"
       }
     ],
-    "storage_size_bytes": 359338675,
-    "storage_size_mb": 342.69
+    "storage_size_bytes": 362328755,
+    "storage_size_mb": 345.54
   },
   "environment": {
     "python_version": "3.11.9",

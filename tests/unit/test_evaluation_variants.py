@@ -164,6 +164,31 @@ def test_artifacts_share_strict_schema_and_configuration_hash_tracks_material_se
     assert configuration_hash(same_config._configuration()) != configuration_hash(changed_config._configuration())
 
 
+def test_pipeline_source_identity_tracks_local_edits_but_not_git_line_endings(tmp_path):
+    backend = tmp_path / "backend" / "app"
+    evaluation = tmp_path / "evaluation"
+    backend.mkdir(parents=True)
+    evaluation.mkdir()
+    source = backend / "planner.py"
+    source.write_bytes(b"answer = 1\n")
+    (evaluation / "variants.py").write_bytes(b"version = 1\n")
+    before = variants.pipeline_source_checksum(tmp_path)
+    source.write_bytes(b"answer = 1\r\n")
+    assert variants.pipeline_source_checksum(tmp_path) == before
+    source.write_bytes(b"answer = 2\n")
+    assert variants.pipeline_source_checksum(tmp_path) != before
+
+
+def test_variant_configuration_identity_includes_pipeline_source(monkeypatch):
+    dense = DenseOnlyVariant(planner=make_plan, retriever=Retriever(), top_k=5, benchmark_version="2.0", corpus_identity="corpus")
+    agentic = AgenticVariant(service=None, top_k=5, benchmark_version="2.0", corpus_identity="corpus")
+    for variant in (dense, agentic):
+        monkeypatch.setattr(variants, "pipeline_source_checksum", lambda: "a" * 64)
+        before = configuration_hash(variant._configuration())
+        monkeypatch.setattr(variants, "pipeline_source_checksum", lambda: "b" * 64)
+        assert configuration_hash(variant._configuration()) != before
+
+
 @pytest.mark.parametrize(
     "setting,changed_value",
     [

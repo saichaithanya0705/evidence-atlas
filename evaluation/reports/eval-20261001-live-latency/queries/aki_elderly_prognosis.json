@@ -1,0 +1,720 @@
+{
+  "query_id": "aki_elderly_prognosis",
+  "variants": {
+    "agentic": {
+      "answer_status": "LIMITED",
+      "candidate_pmids": [
+        "29169177",
+        "19965524",
+        "27520553",
+        "21832983",
+        "23265287",
+        "22789111",
+        "26277844",
+        "23876346",
+        "26526622",
+        "29142930"
+      ],
+      "citation_metrics": {
+        "citation_precision": 0.25,
+        "citation_validity": 1.0
+      },
+      "citation_precision": {
+        "reason": null,
+        "status": "completed",
+        "value": 0.25
+      },
+      "citation_validity": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "configuration_hash": "f2429f9c9a8a2fcd76bcd8b8f106b5679d64db73a0026c57504cf89b750102e0",
+      "diagnostics": [],
+      "filter_accuracy": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "latency_ms": 15773.22,
+      "metrics": {
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0,
+        "precision@10": 0.1,
+        "recall@10": 1.0
+      },
+      "robustness": {
+        "baseline_metrics": {
+          "candidate_filter_compliance": 1.0,
+          "context_precision": 0.1,
+          "query_context_coverage": 0.8
+        },
+        "scenarios": {
+          "acronym_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1333333333
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.6666666666666666
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "acronym query",
+              "scenario": "acronym_query"
+            }
+          },
+          "conflicting_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "conflicting evidence",
+              "scenario": "conflicting_evidence"
+            }
+          },
+          "filter_pressure": {
+            "metric_deltas": {
+              "candidate_filter_compliance": -0.5,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 0.5,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "filters"
+              ],
+              "description": "filter pressure",
+              "scenario": "filter_pressure"
+            }
+          },
+          "incomplete_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0111111111,
+              "query_context_coverage": -0.1
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1111111111111111,
+              "query_context_coverage": 0.7
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "incomplete evidence",
+              "scenario": "incomplete_evidence"
+            }
+          },
+          "irrelevant_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "irrelevant context",
+              "scenario": "irrelevant_context"
+            }
+          },
+          "misleading_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "misleading context",
+              "scenario": "misleading_context"
+            }
+          },
+          "noisy_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "noisy query",
+              "scenario": "noisy_query"
+            }
+          }
+        }
+      },
+      "route_accuracy": {
+        "reason": null,
+        "status": "completed",
+        "value": 0.0
+      },
+      "span_precision": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "subquestion_coverage": {
+        "reason": null,
+        "status": "completed",
+        "value": 0.0
+      }
+    },
+    "dense_only": {
+      "candidate_pmids": [
+        "21832983",
+        "26277844",
+        "22789111",
+        "19965524",
+        "23265287",
+        "27520553",
+        "26526622",
+        "28748892",
+        "23876346",
+        "29027072"
+      ],
+      "configuration_hash": "19c1c18aea300b8f81408ec42147772190d42f7ad744649fc30a81acd5b78a97",
+      "diagnostics": [
+        {
+          "category": "context_noise",
+          "reason": "retrieved candidates do not match labeled evidence"
+        }
+      ],
+      "filter_accuracy": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "latency_ms": 1239.33,
+      "metrics": {
+        "mrr@10": 0.0,
+        "ndcg@10": 0.0,
+        "precision@10": 0.0,
+        "recall@10": 0.0
+      },
+      "robustness": {
+        "baseline_metrics": {
+          "candidate_filter_compliance": 1.0,
+          "context_precision": 0.0,
+          "query_context_coverage": 0.8
+        },
+        "scenarios": {
+          "acronym_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1333333333
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.6666666666666666
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "acronym query",
+              "scenario": "acronym_query"
+            }
+          },
+          "conflicting_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "conflicting evidence",
+              "scenario": "conflicting_evidence"
+            }
+          },
+          "filter_pressure": {
+            "metric_deltas": {
+              "candidate_filter_compliance": -0.5,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 0.5,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "filters"
+              ],
+              "description": "filter pressure",
+              "scenario": "filter_pressure"
+            }
+          },
+          "incomplete_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.7
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "incomplete evidence",
+              "scenario": "incomplete_evidence"
+            }
+          },
+          "irrelevant_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "irrelevant context",
+              "scenario": "irrelevant_context"
+            }
+          },
+          "misleading_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "misleading context",
+              "scenario": "misleading_context"
+            }
+          },
+          "noisy_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.7
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "noisy query",
+              "scenario": "noisy_query"
+            }
+          }
+        }
+      }
+    },
+    "hybrid": {
+      "candidate_pmids": [
+        "29169177",
+        "19965524",
+        "26277844",
+        "28646870",
+        "21832983",
+        "22789111",
+        "26319754",
+        "23265287",
+        "29142930",
+        "27520553"
+      ],
+      "configuration_hash": "6769cfb3581fb383f4ee3c9a7d5d9e02be2e36f9560c187ed825172927cdd400",
+      "diagnostics": [],
+      "filter_accuracy": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "latency_ms": 2388.15,
+      "metrics": {
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0,
+        "precision@10": 0.1,
+        "recall@10": 1.0
+      },
+      "robustness": {
+        "baseline_metrics": {
+          "candidate_filter_compliance": 1.0,
+          "context_precision": 0.1,
+          "query_context_coverage": 0.8
+        },
+        "scenarios": {
+          "acronym_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1333333333
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.6666666666666666
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "acronym query",
+              "scenario": "acronym_query"
+            }
+          },
+          "conflicting_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "conflicting evidence",
+              "scenario": "conflicting_evidence"
+            }
+          },
+          "filter_pressure": {
+            "metric_deltas": {
+              "candidate_filter_compliance": -0.5,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 0.5,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "filters"
+              ],
+              "description": "filter pressure",
+              "scenario": "filter_pressure"
+            }
+          },
+          "incomplete_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0111111111,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1111111111111111,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "incomplete evidence",
+              "scenario": "incomplete_evidence"
+            }
+          },
+          "irrelevant_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "irrelevant context",
+              "scenario": "irrelevant_context"
+            }
+          },
+          "misleading_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "misleading context",
+              "scenario": "misleading_context"
+            }
+          },
+          "noisy_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "noisy query",
+              "scenario": "noisy_query"
+            }
+          }
+        }
+      }
+    },
+    "reranked": {
+      "candidate_pmids": [
+        "29169177",
+        "19965524",
+        "27520553",
+        "21832983",
+        "23265287",
+        "22789111",
+        "26277844",
+        "29142930",
+        "26319754",
+        "28646870"
+      ],
+      "configuration_hash": "71807d2c7c19aa2d6048eb40a216661f610316b30ac33a942fdce8974760546e",
+      "diagnostics": [],
+      "filter_accuracy": {
+        "reason": null,
+        "status": "completed",
+        "value": 1.0
+      },
+      "latency_ms": 3165.49,
+      "metrics": {
+        "mrr@10": 1.0,
+        "ndcg@10": 1.0,
+        "precision@10": 0.1,
+        "recall@10": 1.0
+      },
+      "robustness": {
+        "baseline_metrics": {
+          "candidate_filter_compliance": 1.0,
+          "context_precision": 0.1,
+          "query_context_coverage": 0.8
+        },
+        "scenarios": {
+          "acronym_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": -0.1333333333
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.6666666666666666
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "acronym query",
+              "scenario": "acronym_query"
+            }
+          },
+          "conflicting_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "conflicting evidence",
+              "scenario": "conflicting_evidence"
+            }
+          },
+          "filter_pressure": {
+            "metric_deltas": {
+              "candidate_filter_compliance": -0.5,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 0.5,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "filters"
+              ],
+              "description": "filter pressure",
+              "scenario": "filter_pressure"
+            }
+          },
+          "incomplete_evidence": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0111111111,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1111111111111111,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "incomplete evidence",
+              "scenario": "incomplete_evidence"
+            }
+          },
+          "irrelevant_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "irrelevant context",
+              "scenario": "irrelevant_context"
+            }
+          },
+          "misleading_context": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": -0.0090909091,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.09090909090909091,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "contexts"
+              ],
+              "description": "misleading context",
+              "scenario": "misleading_context"
+            }
+          },
+          "noisy_query": {
+            "metric_deltas": {
+              "candidate_filter_compliance": 0.0,
+              "context_precision": 0.0,
+              "query_context_coverage": 0.0
+            },
+            "metrics": {
+              "candidate_filter_compliance": 1.0,
+              "context_precision": 0.1,
+              "query_context_coverage": 0.8
+            },
+            "provenance": {
+              "changed_fields": [
+                "query"
+              ],
+              "description": "noisy query",
+              "scenario": "noisy_query"
+            }
+          }
+        }
+      }
+    }
+  }
+}

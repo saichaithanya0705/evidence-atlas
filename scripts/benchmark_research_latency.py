@@ -55,6 +55,7 @@ def main() -> None:
     for run in range(1, args.runs + 1):
         started = time.perf_counter()
         response = _json_request(
+            opener,
             f"{base}/research",
             {
                 "query": args.query,

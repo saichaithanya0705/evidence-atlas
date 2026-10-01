@@ -116,25 +116,6 @@ class CanonicalQueryFormulator:
         result_terms = set(re.findall(r"[a-z0-9-]{3,}", result.lower()))
         return bool(source_terms & result_terms)
 
-    def _build_pico_canonical(self, pico: PICOModel) -> Optional[str]:
-        """Synthesizes a canonical query from PICO components using templates."""
-        if not pico:
-            return None
-
-        pop = pico.population or "patients"
-        out = pico.outcome or "primary clinical endpoints"
-
-        if pico.intervention and pico.comparator:
-            return (
-                f"Comparative efficacy and clinical outcomes of {pico.intervention} "
-                f"versus {pico.comparator} in {pop} on {out}"
-            )
-        elif pico.intervention and pico.outcome:
-            return f"Efficacy and clinical outcomes of {pico.intervention} in {pop} on {out}"
-        elif pico.intervention:
-            return f"Clinical efficacy and safety of {pico.intervention} in {pop}"
-        return None
-
     def _enrich_with_mesh(self, text: str, mesh_terms: Optional[List[str]]) -> str:
         """Appends relevant MeSH context to short or generic queries."""
         if not mesh_terms:
@@ -164,12 +145,9 @@ class CanonicalQueryFormulator:
         expanded_query = self._apply_acronym_expansions(clean_query, acronyms_expanded)
         expanded_query = self._normalize_controlled_terms(expanded_query)
 
-        # Step 2: PICO-based synthesis (highest fidelity when PICO is available)
-        pico_canon = self._build_pico_canonical(pico)
-        if pico_canon and len(pico_canon) > 15:
-            return pico_canon
-
-        # Step 3: Use the expanded clean query as the base
+        # PICO is a lossy extraction, not authority to replace the question.
+        # Keep the user's incidence, association, safety, or other objective;
+        # fixed efficacy templates can erase it or invent an intervention.
         clean_norm = expanded_query.strip()
         if len(clean_norm) > 25:
             canon = clean_norm[0].upper() + clean_norm[1:]
@@ -181,7 +159,7 @@ class CanonicalQueryFormulator:
 
         # Step 4: Short queries — enrich with MeSH or standard scientific phrasing
         mesh_context = ", ".join(mesh_terms[:3]) if mesh_terms else "clinical medicine"
-        canon = f"{clean_norm.capitalize()} clinical outcomes and therapeutic efficacy in {mesh_context}"
+        canon = f"Biomedical literature on {clean_norm} in {mesh_context}"
 
         # Invariant check
         if len(canon) <= 15:

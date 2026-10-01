@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = Field(default=2048)
     LLM_SYNTHESIS_MAX_TOKENS: int = Field(default=300, ge=128, le=2048)
     LLM_TIMEOUT_SECONDS: float = Field(default=30.0)
+    LLM_STRUCTURED_TIMEOUT_SECONDS: float = Field(default=10.0, ge=1.0, le=60.0)
+    LLM_RESEARCH_BUDGET_SECONDS: float = Field(default=20.0, ge=5.0, le=180.0)
+    LLM_JUDGE_ON_SUFFICIENT: bool = Field(
+        default=False,
+        description="Run the optional remote evidence judge even when deterministic evidence is sufficient and fully covered",
+    )
 
     # Conversational research bounds
     conversation_history_turn_limit: int = Field(default=12, ge=1, le=50)
@@ -59,6 +65,7 @@ class Settings(BaseSettings):
         default=False,
         description="Retain query and cross-encoder weights between requests when memory permits",
     )
+    RESEARCH_PRELOAD_MODELS: bool = Field(default=False, description="Warm retrieval before API readiness on machines retaining MedCPT models")
     DEVICE: str = Field(default="auto")
     EMBEDDING_DIMENSION: int = Field(default=768)
     EMBEDDING_BATCH_SIZE: int = Field(default=32)

@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-09-28T13:24:10.546636+00:00",
+  "generated_at": "2026-09-28T00:32:42.978705+00:00",
   "setup_mode": "online",
   "status": "ready",
   "dataset": {
     "path": "data/raw/pubmed_sample.csv",
-    "record_count": 30050,
+    "record_count": 29995,
     "status": "ready"
   },
   "models": {
@@ -12,19 +12,19 @@
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "C:\\Users\\sai.chaithanya\\Downloads\\capstone\\data\\models_cache"
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
     },
     "ncbi/MedCPT-Article-Encoder": {
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "C:\\Users\\sai.chaithanya\\Downloads\\capstone\\data\\models_cache"
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
     },
     "ncbi/MedCPT-Cross-Encoder": {
       "status": "cached",
       "weights_verified": true,
       "source": "local-cache-or-huggingface",
-      "cache_dir": "C:\\Users\\sai.chaithanya\\Downloads\\capstone\\data\\models_cache"
+      "cache_dir": "D:\\projects\\capstone\\data\\models_cache"
     }
   }
 }

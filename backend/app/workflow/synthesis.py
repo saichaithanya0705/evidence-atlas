@@ -11,7 +11,7 @@ from time import perf_counter
 
 from backend.app.models.request_response import ClaimVerification, EvidenceRecord
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
-from backend.app.core.nim_client import create_nim_client
+from backend.app.core.nim_client import create_nim_client, structured_completion_options
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +310,7 @@ class EvidenceSynthesizer:
                 int(getattr(self.settings, "LLM_MAX_TOKENS", 2048)),
                 int(getattr(self.settings, "LLM_SYNTHESIS_MAX_TOKENS", 300)),
             ),
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            **structured_completion_options(self.settings),
         )
         raw = str(response.choices[0].message.content or "").strip()
         try:
@@ -350,12 +350,14 @@ class EvidenceSynthesizer:
         insufficient: bool,
     ) -> str:
         sections = []
-        if insufficient:
-            sections.append(f"The available retrieved evidence is insufficient to fully answer the research question: {query.strip()}.")
-        elif records:
-            sections.append("Retrieved abstract evidence:")
-        else:
+        if not records:
             sections.append("No studies were retrieved from the current index; the available evidence is insufficient to answer the research question.")
+        elif insufficient:
+            # Release metadata is not a medical claim and must not enter the
+            # independent semantic-verification batch as an uncited assertion.
+            sections.append("The full question was not established by the available evidence.")
+        else:
+            sections.append("Retrieved abstract evidence:")
         for record in records:
             for span in record.supporting_text_spans:
                 clean_span = re.sub(r"\s+", " ", span).strip()
@@ -366,6 +368,22 @@ class EvidenceSynthesizer:
         if gaps:
             sections.append("Evidence gaps are listed separately in the response.")
         return "\n".join(sections)
+
+    @staticmethod
+    def _fallback_records(query: str, records: Sequence[EvidenceRecord]) -> List[EvidenceRecord]:
+        """Keep fallback claims within the same four-span limit as live selection."""
+        from backend.app.evidence.extraction import _query_specificity_score
+
+        terms = tokenize_biomedical_text(query)
+        selected = []
+        for record in records:
+            if not record.supporting_text_spans:
+                continue
+            span = max(record.supporting_text_spans, key=lambda value: _query_specificity_score(value, terms))
+            selected.append(record.model_copy(update={"supporting_text_spans": [span]}))
+            if len(selected) == 4:
+                break
+        return selected
 
     @staticmethod
     def _is_exact_span_text(text: str, records: Sequence[EvidenceRecord]) -> bool:
@@ -567,6 +585,7 @@ class EvidenceSynthesizer:
             if not isinstance(exc, LookupError):
                 logger.warning("%s; using deterministic evidence-span synthesis", fallback_reason)
 
+        records = self._fallback_records(query, records)
         text = self.deterministic_text(query, records, gaps, insufficient)
         audit = self.validator.validate(text, records)
         if not audit.valid:

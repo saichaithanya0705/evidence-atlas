@@ -19,7 +19,7 @@ from backend.app.models.research_plan import (
 )
 from backend.app.query.models import QueryPlan
 from backend.app.retrieval.bm25 import tokenize_biomedical_text
-from backend.app.core.nim_client import create_nim_client
+from backend.app.core.nim_client import create_nim_client, structured_completion_options
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,8 @@ class EvidenceSufficiencyJudge:
         if str(settings.LLM_MODE).casefold() != "nim" or not settings.get_raw_nvidia_api_key():
             return None
         try:
-            return create_nim_client(settings)
+            self.llm_judge = create_nim_client(settings)
+            return self.llm_judge
         except Exception as exc:
             logger.warning("Unable to initialize optional NIM evidence judge: %s", exc)
             return None
@@ -285,6 +286,7 @@ class EvidenceSufficiencyJudge:
                     "Return one JSON object with grade (SUFFICIENT, PARTIAL, INSUFFICIENT), "
                     "missing_concepts and supported_concepts (only exact items from the allowed list), "
                     "missing_subquestions, conflicts, and a short rationale. "
+                    "Keep the rationale under 15 words and each list to at most six concise items. "
                     "Do not add medical facts or recommendations."
                 ),
             },
@@ -302,8 +304,8 @@ class EvidenceSufficiencyJudge:
                     model=getattr(self.settings, "NVIDIA_MODEL_NAME", "nvidia/nemotron-3-super-120b-a12b"),
                     messages=messages,
                     temperature=0,
-                    max_tokens=300,
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                    max_tokens=600,
+                    **structured_completion_options(self.settings),
                 )
             elif callable(client):
                 response = client(plan.original_query, evidence, concept_list)
@@ -332,6 +334,37 @@ class EvidenceSufficiencyJudge:
             )
         if not candidates:
             return deterministic
+
+        # A complete deterministic SUFFICIENT grade already satisfies the
+        # evidence gate. Avoid a second provider round trip in this common
+        # path, while preserving the optional LLM check for uncertain or
+        # incompletely covered research plans. The override is useful for
+        # audits that explicitly compare both judges.
+        coverage_complete = research_plan is None or (
+            not research_plan.subquestions
+            or (
+                bool(deterministic.subquestion_coverage)
+                and all(
+                    item.status is CoverageStatus.COVERED
+                    for item in deterministic.subquestion_coverage
+                )
+            )
+        )
+        if (
+            deterministic.grade == "SUFFICIENT"
+            and coverage_complete
+            and not bool(getattr(self.settings, "LLM_JUDGE_ON_SUFFICIENT", False))
+        ):
+            return EvidenceGrade(
+                grade=deterministic.grade,
+                missing_concepts=deterministic.missing_concepts,
+                signals={**deterministic.signals, "llm_skipped": "deterministic_sufficient"},
+                rationale=deterministic.rationale,
+                supported_concepts=deterministic.supported_concepts,
+                judge_mode="deterministic_fast_path",
+                subquestion_coverage=deterministic.subquestion_coverage,
+            )
+
         llm_result = self._llm_grade(plan, candidates)
         if llm_result is None:
             return deterministic

@@ -154,37 +154,46 @@ class EvidenceExtractor:
 class EvidenceAnalyzer:
     """Create auditable cross-study groups and conservative agreement labels."""
 
-    _POSITIVE = ("reduced", "improved", "increased", "lower", "benefit", "effective", "protective", "significant")
-    _NEGATIVE = ("increased risk", "worsened", "higher", "harm", "ineffective", "no significant", "not associated", "failed")
-
     @staticmethod
     def _group_key(record: EvidenceRecord) -> str:
         return (record.intervention or record.outcome or record.study_design or "unspecified evidence").strip().casefold()
 
     @classmethod
     def _direction(cls, finding: str) -> Optional[str]:
-        text = finding.casefold()
-        negative = any(term in text for term in cls._NEGATIVE)
-        positive = any(term in text for term in cls._POSITIVE) and not negative
-        if positive == negative:
-            return None
-        return "positive" if positive else "negative"
+        # Magnitude is observable; benefit/harm is not inferable from a word
+        # such as "higher" or "significant" without a comparable endpoint.
+        from backend.app.workflow.synthesis import ClaimToSpanValidator
+
+        directions = {value for dimension, value in ClaimToSpanValidator._directions(finding) if dimension == "magnitude"}
+        return next(iter(directions)) if len(directions) == 1 else None
 
     def analyze(self, records: Sequence[EvidenceRecord], query_plan: QueryPlan) -> dict:
         groups = {}
         for record in records:
             key = self._group_key(record)
             groups.setdefault(key, []).append(record.pmid)
-        directions = [self._direction(record.key_findings) for record in records]
-        observed = {value for value in directions if value is not None}
+        comparable = {}
+        for record in records:
+            # Exact source-grounded fields establish comparability. Missing
+            # context is uncertainty, not proof of cross-study contradiction.
+            if not all((record.population, record.intervention, record.outcome)):
+                continue
+            key = tuple(str(value or "").strip().casefold() for value in (record.population, record.intervention, record.comparator, record.outcome))
+            outcome_spans = [span for span in record.supporting_text_spans if record.outcome.casefold() in span.casefold()]
+            direction = self._direction(" ".join(outcome_spans))
+            if direction:
+                comparable.setdefault(key, []).append(direction)
+        opposite_pairs = ({"increase", "decrease"}, {"increase", "negated-increase"}, {"decrease", "negated-decrease"})
+        contradiction = any(pair.issubset(directions) for directions in comparable.values() for pair in opposite_pairs)
+        agreement = bool(comparable) and sum(map(len, comparable.values())) == len(records) and all(len(directions) >= 2 and len(set(directions)) == 1 for directions in comparable.values())
         if not records:
             consensus = "insufficient"
-        elif len(observed) > 1:
+        elif contradiction:
             consensus = "conflicting"
-        elif len(records) == 1 or not observed:
-            consensus = "mixed" if len(records) > 1 else "insufficient"
-        else:
+        elif agreement:
             consensus = "consensus"
+        else:
+            consensus = "mixed" if len(records) > 1 else "insufficient"
 
         gaps = []
         pico = getattr(query_plan, "pico", None)

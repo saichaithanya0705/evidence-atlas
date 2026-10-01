@@ -26,6 +26,8 @@ from backend.app.query.models import QueryPlan
 from backend.app.workflow.judge import EvidenceGrade, EvidenceSufficiencyJudge
 from backend.app.workflow.planning import ResearchPlanner
 from backend.app.workflow.synthesis import EvidenceSynthesizer, _claims
+from backend.app.workflow.verification import semantic_verification_scope
+from backend.app.core.nim_client import llm_request_scope, llm_time_remaining
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +355,11 @@ class ResearchService:
             "reranker": reranker_trace,
             "timings_ms": timings_ms,
         }
+
+    def warm_up(self) -> None:
+        """Load the real index/encoders before readiness without any LLM call."""
+        plan = self._build_plan("Biomedical literature evidence", {})
+        self._search_plan(plan, top_k=1)
 
     def search(
         self,
@@ -741,6 +748,8 @@ class ResearchService:
                 workflow.stop_reason = "unresolved_conflict"
             elif workflow.loop_count >= data["budget"]:
                 workflow.stop_reason = "correction_budget_exhausted" if data["budget"] else "correction_disabled"
+            elif llm_time_remaining() is not None and llm_time_remaining() < 6.0:
+                workflow.stop_reason = "latency_budget_reserved_for_validation"
             else:
                 proposal_query = None
                 if gap_reviewer is not None:
@@ -1114,13 +1123,14 @@ class ResearchService:
         graph.add_edge("synthesize", "validate")
         graph.add_edge("validate", "done")
         graph.add_edge("done", END)
-        result = graph.compile().invoke(
-            {
-                "workflow": state,
-                "budget": budget,
-                "evidence_limit": int(getattr(self.settings, "RERANKER_TOP_N", 10)),
-            }
-        )
+        with semantic_verification_scope(), llm_request_scope(float(getattr(self.settings, "LLM_RESEARCH_BUDGET_SECONDS", 20))):
+            result = graph.compile().invoke(
+                {
+                    "workflow": state,
+                    "budget": budget,
+                    "evidence_limit": int(getattr(self.settings, "RERANKER_TOP_N", 10)),
+                }
+            )
         completed = result["workflow"]
         completed.trace_payload["timings_ms"] = {
             "total": round((perf_counter() - research_started) * 1000, 2),
@@ -1145,6 +1155,7 @@ class ResearchService:
         )
         return response, self.get_trace(response.request_id) or {}
 
+    @semantic_verification_scope()
     def answer_from_evidence(
         self,
         query: str,
@@ -1271,3 +1282,11 @@ class ResearchService:
     def close(self) -> None:
         if self._hybrid_retriever is not None and hasattr(self._hybrid_retriever, "close"):
             self._hybrid_retriever.close()
+        clients = [getattr(self._evidence_judge, "llm_judge", None), getattr(self._synthesizer, "client", None)]
+        semantic = getattr(self._synthesizer, "semantic_verifier", None)
+        clients.append(getattr(semantic, "client", None))
+        closed = set()
+        for client in clients:
+            if client is not None and id(client) not in closed and callable(getattr(client, "close", None)):
+                client.close()
+                closed.add(id(client))

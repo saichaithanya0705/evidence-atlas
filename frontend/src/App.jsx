@@ -144,7 +144,24 @@ export default function App() {
   const normalizedPath = !isAdminForRoute && path.startsWith("/admin") ? "/research" : path;
   const researchConversationId = normalizedPath.startsWith(researchBaseForRoute + "/") ? decodeURIComponent(normalizedPath.slice(researchBaseForRoute.length + 1)) : null;
   const evidenceWorkspace = useEvidenceWorkspace(researchConversationId);
-  useEffect(() => { let active = true; getSession().then(result => { if (active) setAccount(result.account); }).catch(() => { if (active) setAccount(null); }); getHealth().then(result => { if (active) setHealth(result.status === "healthy" ? "online" : "degraded"); }).catch(() => { if (active) setHealth("offline"); }); return () => { active = false; }; }, []);
+  useEffect(() => {
+    let active = true;
+    let healthTimer;
+    getSession().then(result => { if (active) setAccount(result.account); }).catch(() => { if (active) setAccount(null); });
+    async function refreshHealth() {
+      let healthy = false;
+      try {
+        const result = await getHealth();
+        healthy = result.status === "healthy";
+        if (active) setHealth(healthy ? "online" : "degraded");
+      } catch {
+        if (active) setHealth("offline");
+      }
+      if (active) healthTimer = window.setTimeout(refreshHealth, healthy ? 30000 : 3000);
+    }
+    refreshHealth();
+    return () => { active = false; window.clearTimeout(healthTimer); };
+  }, []);
   useEffect(() => { const expired = () => { setAccount(null); navigate("/login"); }; window.addEventListener("evidence-session-expired", expired); return () => window.removeEventListener("evidence-session-expired", expired); }, []);
   useEffect(() => {
     if (!account || account.must_change_password) return;

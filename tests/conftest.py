@@ -11,6 +11,9 @@ import os
 # fail-closed; test fallback is an explicit opt-in.
 os.environ.setdefault("MEDCPT_ALLOW_MOCK", "true")
 os.environ.setdefault("ADMIN_API_KEY", "test-admin-key")
+# TestClient startup must not inherit this workstation's production GPU
+# preload setting from .env. Live startup is verified separately.
+os.environ.setdefault("RESEARCH_PRELOAD_MODELS", "false")
 
 # Ensure local test directories are resolvable
 CURRENT_DIR = os.path.dirname(__file__)

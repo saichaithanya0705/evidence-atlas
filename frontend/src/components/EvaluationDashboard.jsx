@@ -28,6 +28,16 @@ function QueryFailures({ queries, variants }) {
   return <section className="panel evaluation-section"><h2>Per-query failures</h2><div className="table-scroll"><table><thead><tr><th>Query</th><th>Variant</th><th>Failure</th><th>Reason</th></tr></thead><tbody>{failures.map((failure, index) => <tr key={`${failure.queryId}-${failure.variant}-${index}`}><td>{failure.queryId}</td><td>{failure.variant}</td><td>{failure.category}</td><td>{failure.reason || "—"}</td></tr>)}</tbody></table></div>{failures.length === 0 && <p className="empty-list">No per-query failures were recorded.</p>}</section>;
 }
 
+function ReportCoverage({ report }) {
+  const counts = { completed: 0, not_run: 0, failed: 0 };
+  for (const result of Object.values(report.metrics || {})) if (result.status in counts) counts[result.status] += 1;
+  const answers = report.answer_status_distribution || {};
+  return <>
+    <section className="panel evaluation-section"><h2>Metric execution</h2><p>These statuses describe metric execution. A completed metric does not mean every answer was supported.</p>{Object.entries(counts).map(([status, count]) => <div className="breakdown-row" key={status}><span>{status}</span><strong>{count}</strong></div>)}</section>
+    <section className="panel evaluation-section"><h2>Answer status distribution</h2><p>Answer outcomes recorded by the benchmark, separate from retrieval scores and metric execution.</p>{Object.keys(answers).length ? Object.entries(answers).map(([status, count]) => <div className="breakdown-row" key={status}><span>{status}</span><strong>{count}</strong></div>) : <p className="empty-list">Answer status distribution was not recorded for this run.</p>}</section>
+  </>;
+}
+
 function RobustnessTable({ report }) {
   const rows = [];
   for (const [variant, result] of Object.entries(report.robustness || {})) {
@@ -52,12 +62,13 @@ export default function EvaluationDashboard({ runId, navigate }) {
     return () => { active = false; };
   }, [runId]);
   const report = runId ? state.data : null;
-  return <main className="admin-page evaluation-dashboard"><div className="admin-page-header"><span className="eyebrow">ADMINISTRATION / EVALUATION</span><h1>{runId ? `Evaluation report ${runId}` : "Evaluation reports"}</h1><p>Completed, promoted benchmark runs and their administrator-only metrics.</p></div>
+  return <main className="admin-page evaluation-dashboard"><div className="admin-page-header"><span className="eyebrow">ADMINISTRATION / EVALUATION</span><h1>{runId ? `Evaluation report ${runId}` : "Evaluation reports"}</h1><p>Completed, promoted benchmark runs and their administrator-only metrics. Each report is a saved benchmark snapshot; chat messages do not update its results.</p></div>
     {runId && <a className="back-link" href="/admin/evaluations" onClick={event => { event.preventDefault(); navigate("/admin/evaluations"); }}>← All evaluation reports</a>}
     {state.loading && <p className="panel page-state" role="status">Loading evaluation reports…</p>}
     {state.error && <StatusNotice message={state.error} />}
     {!runId && state.data && <ReportList reports={state.data.items || []} navigate={navigate} />}
     {report && <><section className="panel evaluation-metadata"><div><span>Benchmark checksum</span><code>{report.benchmark_checksum}</code></div><div><span>Corpus checksum</span><code>{report.corpus_checksum}</code></div><div><span>Configuration checksum</span><code>{report.configuration_checksum}</code></div><div><span>Report checksum</span><code>{report.report_checksum}</code></div><div><span>Query count</span><strong>{report.query_count}</strong></div><div><span>Variants</span><strong>{(report.variants || []).join(", ")}</strong></div></section>
+      <ReportCoverage report={report} />
       <MetricTable report={report} />
       <section className="panel evaluation-section"><h2>Failure categories</h2>{Object.keys(report.failure_categories || {}).length ? Object.entries(report.failure_categories).map(([name, value]) => <div className="breakdown-row" key={name}><span>{name}</span><strong>{value}</strong></div>) : <p className="empty-list">No failure categories were recorded.</p>}</section>
       <QueryFailures queries={report.queries} variants={report.variants} />

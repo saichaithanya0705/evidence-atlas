@@ -23,6 +23,7 @@ export default function ConversationMessage({ role, content, status, action, res
   const isAssistant = role === "assistant";
   const failed = status === "FAILED";
   const insufficient = status === "INSUFFICIENT";
+  const researched = action !== "CLARIFY" && action !== "ABSTAIN";
 
   const openEvidence = useCallback((pmid, target = {}) => onEvidence?.(pmid, { turnId, ...target }), [onEvidence, turnId]);
   const openCitations = useCallback(pmids => pmids.forEach(pmid => openEvidence(pmid)), [openEvidence]);
@@ -66,14 +67,14 @@ export default function ConversationMessage({ role, content, status, action, res
   }, [audit.trace, content, evidenceRows, isAdmin, result]);
 
   return <article className={`conversation-message conversation-${role}${failed ? " conversation-failed" : ""}`}>
-    <div className="conversation-message-heading"><strong>{isAssistant ? "Evidence Atlas" : "You"}</strong>{status && action !== "CLARIFY" && <span className={failed ? "answer-status failed" : insufficient ? "answer-status insufficient" : "answer-status"}>{status}</span>}</div>
+    <div className="conversation-message-heading"><strong>{isAssistant ? "Evidence Atlas" : "You"}</strong>{action === "ABSTAIN" && <span className="answer-status insufficient">ABSTAIN</span>}{status && researched && <span className={failed ? "answer-status failed" : insufficient ? "answer-status insufficient" : "answer-status"}>{status}</span>}</div>
     <p>{isAssistant ? renderCitations(content || "", openCitations) : content}</p>
     {failed && <p className="message-context">A technical failure prevented this turn from completing. This is not a finding about the evidence.</p>}
-    {insufficient && <p className="message-context">The available evidence did not establish a reliable answer. Review the original papers and noted gaps.</p>}
-    {result?.evidence_gaps?.length > 0 && <div className="message-context"><strong>Evidence gaps</strong><ul>{result.evidence_gaps.map((gap, index) => <li key={index}>{gap}</li>)}</ul></div>}
-    {isAssistant && result?.interpretation && <InterpretationPanel interpretation={result.interpretation} isAdmin={isAdmin} />}
-    {isAssistant && evidenceRows.length > 0 && <EvidenceTable rows={evidenceRows} activePmids={activePmids} turnId={turnId} coverageStatuses={result?.interpretation?.coverage_statuses || []} onTraceEvidence={openEvidence} onExportJson={safeExport} />}
+    {insufficient && researched && <p className="message-context">The available evidence did not establish a reliable answer. Review the original papers and noted gaps.</p>}
+    {researched && result?.evidence_gaps?.length > 0 && <div className="message-context"><strong>Evidence gaps</strong><ul>{result.evidence_gaps.map((gap, index) => <li key={index}>{gap}</li>)}</ul></div>}
+    {isAssistant && researched && result?.interpretation && <InterpretationPanel interpretation={result.interpretation} isAdmin={isAdmin} />}
+    {isAssistant && researched && evidenceRows.length > 0 && <EvidenceTable rows={evidenceRows} activePmids={activePmids} turnId={turnId} coverageStatuses={result?.interpretation?.coverage_statuses || []} onTraceEvidence={openEvidence} onExportJson={safeExport} />}
     {isAssistant && isAdmin && result?.request_id && <AuditTrail research={result} trace={audit.trace} loading={audit.loading} error={audit.error} onLoad={loadAudit} onExport={safeExport} />}
-    {isAssistant && <RetrievedSources papers={result?.retrieved_papers || []} onSelect={selectPaper} />}
+    {isAssistant && researched && <RetrievedSources papers={result?.retrieved_papers || []} onSelect={selectPaper} />}
   </article>;
 }

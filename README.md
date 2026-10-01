@@ -79,7 +79,7 @@ The default `MEDCPT_KEEP_MODELS_LOADED=false` releases the large query and cross
 
 `python scripts/setup_assets.py` validates/preserves `data/raw/pubmed_sample.csv`, creates expected directories, verifies and caches `ncbi/MedCPT-Query-Encoder`, `ncbi/MedCPT-Article-Encoder`, and `ncbi/MedCPT-Cross-Encoder`, and writes `data/manifests/assets_manifest.json`. Normal mode fails with a nonzero exit code if a model cannot be downloaded and loaded. Use `--offline` only when intentionally working without model downloads. Do not use `--offline` to claim real MedCPT retrieval quality.
 
-The current verified index contains 29,994 PubMed records, as recorded in `data/manifests/index_manifest.json`. The downloaded abstracts and generated indexes are intentionally not committed to Git; a fresh checkout must run `start.bat --ingest` with `PubMed_Phrases.tar.gz` present to reproduce the corpus. `data/manifests/pubmed_ingestion_manifest.json`, `preprocessing_manifest.json`, and `index_manifest.json` record the verified source, transformations, hashes, and exact point count. Any small repository fixture must not be treated as biomedical evidence. The full official PubMed baseline linked in the implementation plan is tens of millions of citations, so this workstation-oriented corpus remains below the plan's preferred 100k-250k controlled subset. NLM remains the source of record, abstracts may be copyrighted, and this project does not imply NLM/NIH/HHS endorsement.
+The recorded corpus used for the published evaluation contains 29,994 PubMed records. A reused local corpus can differ; its verified local manifests and actual index determine its size. The downloaded abstracts and generated indexes are intentionally not committed to Git; a fresh checkout must run `start.bat --ingest` with `PubMed_Phrases.tar.gz` present to acquire and index the selected corpus. `data/manifests/pubmed_ingestion_manifest.json`, `preprocessing_manifest.json`, and `index_manifest.json` record the verified source, transformations, hashes, and exact point count. Check their identities against local artifacts after pulling manifests from another machine. Any small repository fixture must not be treated as biomedical evidence. The full official PubMed baseline linked in the implementation plan is tens of millions of citations, so this workstation-oriented corpus remains below the plan's preferred 100k-250k controlled subset. NLM remains the source of record, abstracts may be copyrighted, and this project does not imply NLM/NIH/HHS endorsement.
 
 Run M1 indexing manually, if needed, from the project root:
 
@@ -98,7 +98,7 @@ The normal launcher runs these steps in order. `data/manifests/` contains the as
 
 ## Evaluation
 
-The frozen 40-query benchmark is `data/evaluation/benchmark_v2.json`. Its labels use web-assisted PubMed source verification: PMID, title, abstract evidence, and local corpus identity were checked against official PubMed records. This is a small query-focused benchmark, not a representative PubMed sample or a clinical validation study. The active corpus and index contain 29,994 records.
+The frozen 40-query benchmark is `data/evaluation/benchmark_v2.json`. Its labels use web-assisted PubMed source verification: PMID, title, abstract evidence, and local corpus identity were checked against official PubMed records. This is a small query-focused benchmark, not a representative PubMed sample or a clinical validation study. The published run used 29,994 records; fresh evaluations bind their artifacts to the actual local corpus checksum and should state any difference from that recorded build.
 
 From the repository root, run all four comparable variants and promote the complete checksum-bound report:
 
@@ -125,7 +125,7 @@ python -m pytest
 
 The application uses local files and embedded Qdrant storage. No Docker service or container is required.
 
-The active 29,994-point collection is larger than Qdrant's recommended embedded-local threshold of 20,000 points. It is correct and usable for this no-Docker workstation setup, but concurrent searches are slower and local payload indexes are not accelerated; a Qdrant server or managed Qdrant deployment is the appropriate production scaling path.
+The recorded 29,994-point collection is larger than Qdrant's recommended embedded-local threshold of 20,000 points. It is correct and usable for this no-Docker workstation setup, but concurrent searches are slower and local payload indexes are not accelerated; a Qdrant server or managed Qdrant deployment is the appropriate production scaling path.
 
 ## UI stress validation
 

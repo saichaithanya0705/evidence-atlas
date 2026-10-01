@@ -4,15 +4,30 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.app.models.request_response import ClaimVerification, EvidenceRecord
-from backend.app.core.nim_client import create_nim_client
+from backend.app.core.nim_client import create_nim_client, structured_completion_options
 from backend.app.workflow.synthesis import ClaimToSpanValidator, _claims, _PMID_PATTERN
 
 logger = logging.getLogger(__name__)
+
+_request_verdicts: ContextVar[dict | None] = ContextVar("semantic_request_verdicts", default=None)
+
+
+@contextmanager
+def semantic_verification_scope():
+    """Reuse identical verified claim/source pairs only inside one request."""
+    existing = _request_verdicts.get()
+    token = _request_verdicts.set(existing if existing is not None else {})
+    try:
+        yield
+    finally:
+        _request_verdicts.reset(token)
 
 
 class _VerificationResponse(BaseModel):
@@ -87,8 +102,8 @@ class SemanticClaimVerifier:
                     {"role": "user", "content": json.dumps({"claims": claims, "accepted_evidence": evidence}, ensure_ascii=False)},
                 ],
                 temperature=0,
-                max_tokens=600,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                max_tokens=min(2048, max(600, 160 * len(claims))),
+                **structured_completion_options(self.settings),
             )
             return self._raw_content(response)
         if callable(client):
@@ -123,6 +138,13 @@ class SemanticClaimVerifier:
             )
 
         client = self._get_client()
+        cache = _request_verdicts.get()
+        keys = [json.dumps({"verifier": id(self), "model": getattr(self.settings, "NVIDIA_MODEL_NAME", None), "claim": entry["claim"], "pmids": entry["pmids"], "sources": [
+            {"pmid": source["pmid"], "spans": source["spans"]}
+            for source in accepted_evidence if source["claim_index"] == entry["claim_index"]
+        ]}, sort_keys=True) for entry in claim_entries]
+        if cache is not None and all(key in cache for key in keys):
+            return [cache[key].model_copy(update={"claim_index": index}) for index, key in enumerate(keys)]
         parsed_verdicts = None
         if client is not None:
             try:
@@ -137,6 +159,7 @@ class SemanticClaimVerifier:
 
         result_by_index = {}
         invalid_indexes = set()
+        untrusted_indexes = set()
         if parsed_verdicts is not None:
             for verdict in parsed_verdicts:
                 if verdict.claim_index >= len(claims) or verdict.claim_index in result_by_index:
@@ -147,6 +170,7 @@ class SemanticClaimVerifier:
                     not verdict.supporting_pmids
                     or any(pmid not in expected_pmids for pmid in verdict.supporting_pmids)
                 ):
+                    untrusted_indexes.add(verdict.claim_index)
                     verdict = verdict.model_copy(update={"supported": False, "supporting_pmids": []})
                 result_by_index[verdict.claim_index] = verdict
 
@@ -163,6 +187,13 @@ class SemanticClaimVerifier:
                 results.append(ClaimVerification(claim_index=index, supported=False, supporting_pmids=[], rationale=rationale))
             else:
                 results.append(verdict)
+
+        # Network errors, malformed/incomplete batches, and invented source IDs
+        # are not proofs and must never enter the request's verification cache.
+        if cache is not None and parsed_verdicts is not None and not invalid_indexes and len(result_by_index) == len(claims):
+            for index, verdict in enumerate(results):
+                if index not in untrusted_indexes and accepted_pmids_by_index[index] and claims[index] in deterministic_supported and len(cache) < 256:
+                    cache[keys[index]] = verdict.model_copy(deep=True)
 
         if self.event_sink:
             self.event_sink(

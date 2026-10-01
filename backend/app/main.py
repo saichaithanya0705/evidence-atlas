@@ -56,6 +56,8 @@ app.include_router(conversation_router)
 def initialize_application_storage() -> None:
     initialize_db(get_settings().APP_DATABASE_PATH)
     AuditStore(get_settings().APP_DATABASE_PATH).recover_interrupted()
+    if get_settings().RESEARCH_PRELOAD_MODELS:
+        _get_research_service().warm_up()
 
 _query_service = QueryAnalysisService()
 _research_service: Optional[Any] = None

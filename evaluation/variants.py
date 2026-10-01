@@ -52,6 +52,9 @@ _AGENTIC_SETTINGS = _RERANKED_SETTINGS + (
     "LLM_MAX_TOKENS",
     "LLM_SYNTHESIS_MAX_TOKENS",
     "LLM_TIMEOUT_SECONDS",
+    "LLM_STRUCTURED_TIMEOUT_SECONDS",
+    "LLM_RESEARCH_BUDGET_SECONDS",
+    "LLM_JUDGE_ON_SUFFICIENT",
     "agent_output_max_tokens",
 )
 
@@ -105,6 +108,21 @@ class EvaluationVariant(Protocol):
 
 def configuration_hash(configuration: Mapping[str, Any]) -> str:
     return stable_checksum(dict(configuration))
+
+
+def pipeline_source_checksum(root: Path | None = None) -> str:
+    """Invalidate resumable artifacts when executable pipeline code changes.
+
+    Include local edits, not just HEAD, and normalize Git line-ending changes.
+    Only Python source identities enter the checksum; credentials are excluded.
+    """
+    root = root or Path(__file__).resolve().parents[1]
+    paths = sorted((root / "backend" / "app").rglob("*.py"))
+    paths.append(root / "evaluation" / "variants.py")
+    return stable_checksum({
+        path.relative_to(root).as_posix(): stable_checksum(path.read_text(encoding="utf-8"))
+        for path in paths
+    })
 
 
 def _material_settings(settings: Any, names: Sequence[str]) -> dict[str, Any]:
@@ -171,6 +189,7 @@ class _RetrievalVariant:
             "top_k": self.top_k,
             "benchmark_version": self.benchmark_version,
             "corpus_identity": self.corpus_identity,
+            "pipeline_source_checksum": pipeline_source_checksum(),
             "settings": _material_settings(self.settings, names),
         }
 
@@ -260,6 +279,7 @@ class AgenticVariant(_RetrievalVariant):
             "settings": _material_settings(self.settings, _AGENTIC_SETTINGS),
             "benchmark_version": self.benchmark_version,
             "corpus_identity": self.corpus_identity,
+            "pipeline_source_checksum": pipeline_source_checksum(),
         }
 
     def run(self, entry: BenchmarkEntry) -> QueryEvaluationArtifact:

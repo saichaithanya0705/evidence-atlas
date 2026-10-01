@@ -1,2 +1,4 @@
 # Report hashes are over raw bytes; preserve generated line endings in checkouts.
 evaluation/reports/** -text
+# The frozen benchmark is also included in report checksums.
+data/evaluation/benchmark_v2.json -text
